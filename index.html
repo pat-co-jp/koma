@@ -1,0 +1,697 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Koma">
+<meta name="theme-color" content="#0e0e10">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" href="icon-192.png">
+<title>Koma</title>
+<script src="vendor/jszip.min.js"></script>
+<style>
+:root{
+  --ink:#0e0e10;--panel:#18181b;--line:#2b2b31;--text:#ecebe6;--mute:#9a988f;
+  --accent:#e0533a;--gold:#f2c14e;--paper:#f7f2e8;--paper2:#ece5d6;
+  --st:env(safe-area-inset-top,0px);--sb:env(safe-area-inset-bottom,0px);
+  --sl:env(safe-area-inset-left,0px);--sr:env(safe-area-inset-right,0px);
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;background:var(--ink);color:var(--text);overflow:hidden;overscroll-behavior:none;
+  font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI","Hiragino Sans","Yu Gothic",sans-serif;-webkit-text-size-adjust:100%}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+button:disabled{opacity:.35;cursor:default}
+.jp{font-family:"Hiragino Mincho ProN","Yu Mincho","Hiragino Sans",serif}
+[hidden]{display:none!important}
+.ib{width:40px;height:40px;border-radius:12px;display:grid;place-items:center;flex:none}
+.ib:active{background:rgba(255,255,255,.08)}
+.ib svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+
+/* ---------- library ---------- */
+#lib{position:fixed;inset:0;display:flex;flex-direction:column;z-index:10}
+.lib-head{display:flex;align-items:center;gap:8px;padding:calc(var(--st) + 10px) calc(var(--sr) + 12px) 10px calc(var(--sl) + 18px)}
+.lib-head h1{flex:1;margin:0;font-size:24px;letter-spacing:-.01em;display:flex;align-items:center;gap:10px}
+.lib-head h1 b{font:700 26px/1 "Hiragino Mincho ProN","Yu Mincho",serif;color:var(--accent)}
+.lib-body{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:6px calc(var(--sr) + 16px) calc(var(--sb) + 30px) calc(var(--sl) + 16px)}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(132px,1fr));gap:16px}
+.vol{position:relative;text-align:left;display:block;width:100%}
+.vol .cv{aspect-ratio:1/1.42;border-radius:10px;overflow:hidden;background:var(--panel);border:1px solid var(--line)}
+.vol .cv img{width:100%;height:100%;object-fit:cover;display:block}
+.vol .t{font-size:13.5px;font-weight:600;margin-top:7px;line-height:1.25;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.vol .m{font-size:12px;color:var(--mute);margin-top:2px}
+.vol .bar{height:3px;border-radius:2px;background:var(--line);margin-top:5px;overflow:hidden}
+.vol .bar i{display:block;height:100%;background:var(--accent)}
+.badge{position:absolute;top:6px;left:6px;font-size:10.5px;font-weight:700;padding:2px 7px;border-radius:999px;background:rgba(14,14,16,.82);color:var(--gold)}
+.badge.none{color:var(--mute)}
+.empty{max-width:520px;margin:30px auto 0;color:var(--mute);font-size:14px}
+.empty .big{display:flex;width:100%;justify-content:center;padding:15px;font-size:16px;font-weight:600;border-radius:14px;background:var(--accent);color:#fff;margin:18px 0}
+.empty ol{padding-left:18px}
+.empty li{margin:6px 0}
+.foot{color:var(--mute);font-size:12px;margin-top:26px;text-align:center}
+
+/* ---------- reader ---------- */
+#reader{position:fixed;inset:0;z-index:20;background:var(--ink)}
+#viewer{position:absolute;inset:0;touch-action:none;user-select:none;-webkit-user-select:none;overflow:hidden}
+#stage{position:absolute;left:0;top:0;transform-origin:0 0;will-change:transform}
+#stage.anim{transition:transform .22s ease}
+#pg{width:100%;height:100%;display:block;pointer-events:none;-webkit-user-drag:none;background:#fff}
+#overlay{position:absolute;inset:0}
+.bx{position:absolute;border:1.5px solid rgba(224,83,58,.8);background:rgba(224,83,58,.07);border-radius:7px;min-width:24px;min-height:24px}
+.bx i{position:absolute;top:-8px;right:-8px;background:var(--accent);color:#fff;font:700 10px/17px system-ui;font-style:normal;min-width:17px;height:17px;border-radius:9px;text-align:center;padding:0 4px;pointer-events:none}
+.bx.on{border-color:var(--gold);background:rgba(242,193,78,.16);box-shadow:0 0 0 3px rgba(242,193,78,.35)}
+.bx.sfx{border-style:dashed}
+.bar{position:absolute;left:0;right:0;z-index:5;display:flex;align-items:center;gap:6px;transition:transform .2s ease,opacity .2s ease}
+#top{top:0;padding:calc(var(--st) + 6px) calc(var(--sr) + 10px) 10px calc(var(--sl) + 10px);background:linear-gradient(to bottom,rgba(14,14,16,.92),rgba(14,14,16,.72) 70%,rgba(14,14,16,0))}
+#bottom{bottom:0;padding:14px calc(var(--sr) + 84px) calc(var(--sb) + 12px) calc(var(--sl) + 16px);background:linear-gradient(to top,rgba(14,14,16,.92),rgba(14,14,16,.6) 70%,rgba(14,14,16,0))}
+#reader.hide-chrome #top{transform:translateY(-110%);opacity:0;pointer-events:none}
+#reader.hide-chrome #bottom{transform:translateY(110%);opacity:0;pointer-events:none}
+.ttl{flex:1;min-width:0;text-align:center}
+.ttl b{display:block;font-weight:600;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ttl span{font-size:12px;color:var(--mute)}
+#slider{flex:1;accent-color:var(--accent);height:28px}
+#pnum{font-size:12px;color:var(--mute);min-width:64px;text-align:right;font-variant-numeric:tabular-nums}
+#boxBtn{position:absolute;z-index:6;right:calc(var(--sr) + 16px);bottom:calc(var(--sb) + 14px);width:58px;height:58px;border-radius:50%;
+  background:#2b2b31;color:var(--gold);border:1.5px solid var(--gold);box-shadow:0 6px 20px rgba(0,0,0,.45);display:grid;place-items:center;
+  font:700 24px/1 "Hiragino Mincho ProN","Yu Mincho",serif}
+#boxBtn.off{color:var(--mute);border-color:var(--line)}
+#boxBtn small{position:absolute;bottom:-2px;right:-2px;background:var(--gold);color:#111;font:700 10px/17px system-ui;min-width:18px;height:18px;border-radius:9px;padding:0 4px}
+#reader.sheet-open #boxBtn{opacity:0;pointer-events:none}
+
+/* ---------- sheet ---------- */
+#sheet{position:absolute;z-index:8;left:0;right:0;bottom:0;max-height:58vh;background:var(--paper);color:#1b1a18;border-radius:20px 20px 0 0;
+  box-shadow:0 -10px 30px rgba(0,0,0,.45);transform:translateY(105%);transition:transform .22s ease;display:flex;flex-direction:column}
+#sheet.open{transform:none}
+#sheetBody{overflow-y:auto;-webkit-overflow-scrolling:touch;padding:6px calc(var(--sr) + 16px) calc(var(--sb) + 16px) calc(var(--sl) + 16px)}
+.grab{width:38px;height:5px;border-radius:3px;background:#cfc6b3;margin:8px auto 2px}
+.sh-head{display:flex;align-items:center;gap:4px;margin-bottom:4px}
+.sh-head .ib{width:36px;height:36px;color:#3a3732}
+.sh-head .ib:active{background:rgba(0,0,0,.06)}
+.sh-title{flex:1;font-size:12.5px;color:#7a7364;text-transform:uppercase;letter-spacing:.06em}
+.line{font-size:25px;line-height:2.05;padding:2px 0 8px;word-break:break-all}
+.tk{border-radius:6px;padding:0 1px;cursor:pointer;border-bottom:2px solid transparent}
+.tk.on{background:#f2c14e66}
+.tk.p-verb{border-bottom-color:#e0533a55}
+.tk.p-noun,.tk.p-pronoun,.tk.p-name{border-bottom-color:#3d6fb455}
+.tk.p-i-adj,.tk.p-na-adj,.tk.p-adverb{border-bottom-color:#4f8a5b55}
+.tk.p-particle,.tk.p-aux,.tk.p-punct{color:#6d675c}
+rt{font-size:.42em;color:#7a7364;font-family:"Hiragino Sans","Yu Gothic",sans-serif}
+.hint{font-size:13px;color:#7a7364;padding:4px 0 10px}
+.card{background:#fff;border:1px solid var(--paper2);border-radius:14px;padding:12px 14px;margin:2px 0 12px}
+.card .w{font-size:26px;line-height:1.2}
+.card .rd{font-size:13px;color:#7a7364;margin:2px 0 6px}
+.card .g{font-size:16px;font-weight:600}
+.card .n{font-size:13.5px;color:#4b463d;margin-top:6px;padding-top:6px;border-top:1px dashed #e2d9c6}
+.card .row{display:flex;gap:8px;margin-top:10px}
+.chip{display:inline-block;font-size:11px;padding:1px 7px;border-radius:999px;background:#ece5d6;color:#5a5446;margin-left:4px;vertical-align:2px;font-family:system-ui}
+.pill{display:inline-flex;align-items:center;gap:6px;padding:7px 12px;border-radius:999px;background:#ece5d6;color:#2a2724;font-size:13px;text-decoration:none}
+.pill.pri{background:#1b1a18;color:#f7f2e8}
+.pill.saved{background:#f2c14e;color:#1b1a18}
+.acts{display:flex;flex-wrap:wrap;gap:8px;margin:2px 0 10px}
+.tl,.note{font-size:15px;background:#fff;padding:9px 12px;border-radius:0 10px 10px 0;margin-bottom:10px}
+.tl{border-left:3px solid var(--accent)}
+.note{border-left:3px solid #4f8a5b;font-size:14px;line-height:1.5}
+
+/* ---------- panels, toast, progress ---------- */
+#panel{position:fixed;z-index:40;inset:0;background:var(--ink);display:flex;flex-direction:column}
+.p-head{display:flex;align-items:center;gap:8px;padding:calc(var(--st) + 8px) calc(var(--sr) + 12px) 8px calc(var(--sl) + 16px);border-bottom:1px solid var(--line)}
+.p-head h2{flex:1;margin:0;font-size:17px}
+.p-body{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:14px calc(var(--sr) + 16px) calc(var(--sb) + 24px) calc(var(--sl) + 16px)}
+.grp{margin-bottom:22px}
+.grp h3{font-size:12px;letter-spacing:.07em;text-transform:uppercase;color:var(--mute);margin:0 0 8px;font-weight:600}
+.grp p{font-size:12.5px;color:var(--mute);margin:6px 0 0}
+.seg{display:flex;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:3px;gap:3px}
+.seg button{flex:1;padding:9px 4px;border-radius:9px;font-size:13.5px;color:var(--mute)}
+.seg button.on{background:#2f2f36;color:var(--text);font-weight:600}
+.vrow{display:flex;gap:12px;align-items:flex-start;padding:12px 0;border-bottom:1px solid var(--line)}
+.vrow .vw{font-size:22px;min-width:84px}
+.vrow .vr{font-size:12px;color:var(--mute)}
+.vrow .vg{font-size:14.5px}
+.vrow .vc{font-size:13px;color:var(--mute);margin-top:3px}
+.vrow .x{color:var(--mute);margin-left:auto}
+.dk{display:inline-flex;align-items:center;gap:6px;padding:9px 14px;border-radius:12px;background:var(--panel);border:1px solid var(--line);font-size:14px}
+.dk.pri{background:var(--accent);border-color:var(--accent);color:#fff}
+.dk.danger{color:#ff8a7a}
+textarea.copybox{width:100%;height:160px;background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:10px;padding:10px;font:12px/1.4 ui-monospace,monospace;margin-top:10px}
+#toast{position:fixed;z-index:60;left:50%;bottom:calc(var(--sb) + 92px);transform:translate(-50%,20px);opacity:0;pointer-events:none;
+  background:#f7f2e8;color:#1b1a18;padding:9px 14px;border-radius:12px;font-size:13.5px;max-width:86vw;text-align:center;transition:.2s;box-shadow:0 6px 20px rgba(0,0,0,.4)}
+#toast.on{opacity:1;transform:translate(-50%,0)}
+#toast.act{pointer-events:auto}
+#busy{position:fixed;z-index:70;inset:0;background:rgba(14,14,16,.85);display:grid;place-items:center}
+#busy div{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:20px 22px;min-width:240px;text-align:center}
+#busy .spin{width:30px;height:30px;border:3px solid rgba(255,255,255,.15);border-top-color:var(--accent);border-radius:50%;animation:sp .8s linear infinite;margin:0 auto 12px}
+@keyframes sp{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+
+<!-- Library -->
+<section id="lib">
+  <div class="lib-head">
+    <h1><b>読</b>Koma</h1>
+    <button class="ib" data-act="import" aria-label="Import"><svg viewBox="0 0 24 24"><path d="M12 4v11M7 10l5 5 5-5M5 19h14"/></svg></button>
+    <button class="ib" data-act="vocab" aria-label="Saved words"><svg viewBox="0 0 24 24"><path d="M6 3h12v18l-6-4-6 4z"/></svg></button>
+    <button class="ib" data-act="settings" aria-label="Settings"><svg viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg></button>
+  </div>
+  <div class="lib-body" id="libBody"></div>
+</section>
+
+<!-- Reader -->
+<section id="reader" hidden>
+  <div id="viewer"><div id="stage"><img id="pg" alt=""><div id="overlay"></div></div></div>
+  <header id="top" class="bar">
+    <button class="ib" data-act="close-reader" aria-label="Library"><svg viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg></button>
+    <div class="ttl"><b id="volName"></b><span id="volSub"></span></div>
+    <button class="ib" data-act="vocab" aria-label="Saved words"><svg viewBox="0 0 24 24"><path d="M6 3h12v18l-6-4-6 4z"/></svg></button>
+    <button class="ib" data-act="settings" aria-label="Settings"><svg viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg></button>
+  </header>
+  <footer id="bottom" class="bar">
+    <input id="slider" type="range" min="1" max="1" value="1" aria-label="Page">
+    <div id="pnum"></div>
+  </footer>
+  <button id="boxBtn" aria-label="Show or hide boxes">読</button>
+  <section id="sheet"><div class="grab"></div><div id="sheetBody"></div></section>
+</section>
+
+<section id="panel" hidden></section>
+<div id="busy" hidden><div><div class="spin"></div><div id="busyTxt">Working…</div></div></div>
+<div id="toast"></div>
+<input id="file" type="file" multiple hidden accept=".cbz,.zip,.json,application/zip,application/json,application/x-cbz,application/vnd.comicbook+zip">
+
+<script>
+(() => {
+"use strict";
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const IMG_RE = /\.(jpe?g|png|webp|gif|avif)$/i;
+const nat = (a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
+const mimeFor = n => /\.png$/i.test(n) ? "image/png" : /\.webp$/i.test(n) ? "image/webp" : /\.gif$/i.test(n) ? "image/gif" : /\.avif$/i.test(n) ? "image/avif" : "image/jpeg";
+
+/* ================= storage (IndexedDB) ================= */
+const DB_NAME = "koma", DB_VER = 1;
+let dbp;
+function db() {
+  return dbp ||= new Promise((res, rej) => {
+    const r = indexedDB.open(DB_NAME, DB_VER);
+    r.onupgradeneeded = () => {
+      const d = r.result;
+      d.createObjectStore("volumes", { keyPath: "id" });
+      d.createObjectStore("pages", { keyPath: ["vol", "i"] });
+      d.createObjectStore("packs", { keyPath: "vol" });
+      d.createObjectStore("kv", { keyPath: "k" });
+    };
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  });
+}
+async function tx(stores, mode, fn) {
+  const d = await db();
+  return new Promise((res, rej) => {
+    const t = d.transaction(stores, mode);
+    let out;
+    Promise.resolve(fn(t)).then(v => { out = v; });
+    t.oncomplete = () => res(out);
+    t.onerror = () => rej(t.error);
+    t.onabort = () => rej(t.error || new Error("aborted"));
+  });
+}
+const req = r => new Promise((res, rej) => { r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
+const get = (store, key) => tx([store], "readonly", t => req(t.objectStore(store).get(key)));
+const put = (store, val) => tx([store], "readwrite", t => { t.objectStore(store).put(val); });
+const all = store => tx([store], "readonly", t => req(t.objectStore(store).getAll()));
+const kvGet = async (k, d) => { try { const r = await get("kv", k); return r ? r.v : d; } catch { return d; } };
+const kvSet = (k, v) => put("kv", { k, v });
+
+/* ================= state ================= */
+const DEF = { level: 3, furi: "above", dir: "rtl", boxes: true };
+let settings = { ...DEF };
+const st = {
+  vol: null, pack: null, idx: 0, n: 0, url: null,
+  z: { z: 1, tx: 0, ty: 0 }, base: { L: 0, T: 0, w: 0, h: 0 }, shift: 0,
+  sheet: null, vocab: []
+};
+const viewer = $("#viewer"), stage = $("#stage"), img = $("#pg"), overlay = $("#overlay");
+const sheet = $("#sheet"), sheetBody = $("#sheetBody"), panel = $("#panel"), reader = $("#reader"), slider = $("#slider");
+const fileIn = $("#file");
+const canSpeak = "speechSynthesis" in window && typeof SpeechSynthesisUtterance !== "undefined";
+
+let toastT;
+function toast(msg, action) {
+  const t = $("#toast"); t.innerHTML = esc(msg); t.classList.toggle("act", !!action); t.onclick = action || null;
+  t.classList.add("on"); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove("on"), action ? 8000 : 2600);
+}
+function busy(msg) { const b = $("#busy"); if (!msg) { b.hidden = true; return; } $("#busyTxt").textContent = msg; b.hidden = false; }
+
+/* ================= library ================= */
+const coverUrls = new Map();
+async function coverUrl(vol) {
+  if (coverUrls.has(vol.id)) return coverUrls.get(vol.id);
+  const p = await get("pages", [vol.id, 0]);
+  const u = p ? URL.createObjectURL(p.blob) : "";
+  coverUrls.set(vol.id, u); return u;
+}
+function fmtBytes(b) { return b > 1e9 ? (b / 1e9).toFixed(1) + " GB" : (b / 1e6).toFixed(0) + " MB"; }
+async function renderLibrary() {
+  const vols = (await all("volumes")).sort((a, b) => (b.lastReadAt || b.addedAt) - (a.lastReadAt || a.addedAt));
+  const body = $("#libBody");
+  if (!vols.length) {
+    body.innerHTML = `<div class="empty">
+      <p>No volumes yet. Your laptop prepares them: drop a <b>.cbz</b> into <b>iCloud Drive › 6. Automation › Koma › Inbox</b>, and it appears in <b>Koma › Library</b> with a matching <b>.koma.json</b> reading pack.</p>
+      <button class="big" data-act="import">Import a volume</button>
+      <ol><li>Tap Import and open the volume's folder in Library.</li><li>Select both the <b>.cbz</b> and the <b>.koma.json</b>.</li><li>It's stored in Koma and reads fully offline from then on.</li></ol></div>${await footer()}`;
+    return;
+  }
+  const cards = await Promise.all(vols.map(async v => {
+    const pct = v.pageCount ? Math.round(((v.lastPage || 0) + 1) / v.pageCount * 100) : 0;
+    return `<button class="vol" data-vol="${esc(v.id)}">
+      <div class="cv">${(await coverUrl(v)) ? `<img src="${await coverUrl(v)}" alt="">` : ""}</div>
+      <span class="badge ${v.hasPack ? "" : "none"}">${v.hasPack ? "読 " + v.bubbles : "no readings"}</span>
+      <div class="t">${esc(v.title)}</div>
+      <div class="m">${v.lastReadAt ? `p. ${(v.lastPage || 0) + 1} / ${v.pageCount}` : `${v.pageCount} pages`}</div>
+      <div class="bar"><i style="width:${v.lastReadAt ? pct : 0}%"></i></div></button>`;
+  }));
+  body.innerHTML = `<div class="grid">${cards.join("")}</div>${await footer()}`;
+}
+async function footer() {
+  let s = "";
+  try { const e = await navigator.storage.estimate(); s = `Using ${fmtBytes(e.usage || 0)} on this device`; } catch {}
+  return `<div class="foot">${s}${s ? " · " : ""}Koma ${APP_VERSION}</div>`;
+}
+$("#libBody").addEventListener("click", e => { const v = e.target.closest("[data-vol]"); if (v) openVolume(v.dataset.vol); });
+
+/* ================= import ================= */
+async function sha16(blob) {
+  const d = await crypto.subtle.digest("SHA-256", await blob.arrayBuffer());
+  return [...new Uint8Array(d)].slice(0, 8).map(x => x.toString(16).padStart(2, "0")).join("");
+}
+const stemOf = n => n.replace(/\.koma\.json$/i, "").replace(/\.(cbz|zip|json)$/i, "");
+fileIn.addEventListener("change", async () => {
+  const files = [...fileIn.files]; fileIn.value = "";
+  if (!files.length) return;
+  const archives = files.filter(f => /\.(cbz|zip)$/i.test(f.name));
+  const packs = [];
+  for (const f of files.filter(f => /\.json$/i.test(f.name))) {
+    try { const j = JSON.parse(await f.text()); if (j.format === "koma-pack") packs.push({ file: f, pack: j }); else toast(`${f.name} isn't a Koma reading pack.`); }
+    catch { toast(`Couldn't read ${f.name}.`); }
+  }
+  try {
+    let done = 0;
+    for (const a of archives) {
+      busy(`Importing ${a.name}…`);
+      const id = await sha16(a);
+      const match = packs.find(p => p.pack.id === id) || packs.find(p => stemOf(p.file.name) === stemOf(a.name));
+      await importArchive(a, id, match && match.pack);
+      if (match) packs.splice(packs.indexOf(match), 1);
+      done++;
+    }
+    for (const p of packs) {  // packs for volumes already in the library
+      const v = await get("volumes", p.pack.id);
+      if (!v) { toast(`No imported volume matches ${p.file.name}. Select its .cbz too.`); continue; }
+      await attachPack(v, p.pack); done++;
+    }
+    if (done) toast(`Imported ${done} item${done > 1 ? "s" : ""}.`);
+  } catch (e) {
+    console.error(e);
+    toast(/quota/i.test(String(e && e.name)) ? "Not enough storage on this device." : "Import failed: " + (e && e.message || e));
+  } finally { busy(""); renderLibrary(); }
+});
+async function importArchive(file, id, pack) {
+  const zip = await JSZip.loadAsync(file);
+  const names = Object.values(zip.files).filter(f => !f.dir && IMG_RE.test(f.name) && !/(^|\/)(__MACOSX|\.)/.test(f.name)).map(f => f.name).sort(nat);
+  if (!names.length) throw new Error("no images in " + file.name);
+  await tx(["pages"], "readwrite", t => { t.objectStore("pages").delete(IDBKeyRange.bound([id, 0], [id, Infinity])); });
+  for (let i = 0; i < names.length; i++) {
+    if (i % 10 === 0) busy(`Importing ${file.name}… ${i}/${names.length}`);
+    const blob = new Blob([await zip.files[names[i]].async("arraybuffer")], { type: mimeFor(names[i]) });
+    await put("pages", { vol: id, i, name: names[i], blob });
+  }
+  const prev = await get("volumes", id);
+  const vol = { id, title: (pack && pack.title) || stemOf(file.name), names, pageCount: names.length, bytes: file.size,
+    addedAt: prev ? prev.addedAt : Date.now(), lastPage: prev ? prev.lastPage : 0, lastReadAt: prev ? prev.lastReadAt : 0,
+    hasPack: false, bubbles: 0 };
+  await put("volumes", vol);
+  coverUrls.delete(id);
+  if (pack) await attachPack(vol, pack);
+}
+async function attachPack(vol, pack) {
+  if (pack.version > 1) toast("This pack is from a newer pipeline. Update the app if anything looks wrong.");
+  const byName = new Map(pack.pages.map(p => [p.name, p]));
+  const pages = vol.names.map((n, i) => byName.get(n) || pack.pages[i] || { bubbles: [] });
+  const bubbles = pages.reduce((s, p) => s + (p.bubbles ? p.bubbles.length : 0), 0);
+  await put("packs", { vol: vol.id, pages, level: pack.level, model: pack.model, created: pack.created });
+  vol.hasPack = true; vol.bubbles = bubbles; vol.title = pack.title || vol.title;
+  await put("volumes", vol);
+}
+async function deleteVolume(id) {
+  await tx(["pages", "packs", "volumes"], "readwrite", t => {
+    t.objectStore("pages").delete(IDBKeyRange.bound([id, 0], [id, Infinity]));
+    t.objectStore("packs").delete(id); t.objectStore("volumes").delete(id);
+  });
+  coverUrls.delete(id);
+}
+
+/* ================= reader ================= */
+async function openVolume(id) {
+  const vol = await get("volumes", id); if (!vol) return;
+  const pk = await get("packs", id);
+  st.vol = vol; st.pack = pk ? pk.pages : null; st.n = vol.pageCount;
+  reader.hidden = false; reader.classList.remove("hide-chrome"); $("#lib").hidden = true;
+  await showPage(Math.min(vol.lastPage || 0, vol.pageCount - 1));
+  if (!st.pack) toast("No reading pack for this volume. Import its .koma.json to get help.");
+}
+function closeReader() {
+  closeSheet(); reader.hidden = true; $("#lib").hidden = false;
+  if (st.url) { URL.revokeObjectURL(st.url); st.url = null; }
+  renderLibrary();
+}
+let seq = 0, saveT;
+async function showPage(i) {
+  i = Math.max(0, Math.min(st.n - 1, i));
+  const my = ++seq; st.idx = i; closeSheet();
+  const p = await get("pages", [st.vol.id, i]);
+  if (my !== seq || !p) return;
+  const u = URL.createObjectURL(p.blob);
+  img.src = u;
+  try { await img.decode(); } catch {}
+  if (my !== seq) { URL.revokeObjectURL(u); return; }
+  if (st.url) URL.revokeObjectURL(st.url);
+  st.url = u;
+  st.z = { z: 1, tx: 0, ty: 0 }; st.shift = 0; layout(); renderOverlay(); updateChrome();
+  clearTimeout(saveT);
+  saveT = setTimeout(() => { st.vol.lastPage = i; st.vol.lastReadAt = Date.now(); put("volumes", st.vol); }, 800);
+}
+const fwd = () => st.idx < st.n - 1 ? showPage(st.idx + 1) : toast("Last page");
+const back = () => st.idx > 0 ? showPage(st.idx - 1) : toast("First page");
+const curPage = () => st.pack ? st.pack[st.idx] : null;
+function updateChrome() {
+  $("#volName").textContent = st.vol.title;
+  $("#volSub").textContent = `${st.idx + 1} / ${st.n}`;
+  $("#pnum").textContent = `${st.idx + 1} / ${st.n}`;
+  slider.max = st.n; slider.value = st.idx + 1; slider.dir = settings.dir;
+  const p = curPage(); const b = $("#boxBtn");
+  b.hidden = !st.pack;
+  b.classList.toggle("off", !settings.boxes);
+  b.innerHTML = `読${p && p.bubbles.length ? `<small>${p.bubbles.length}</small>` : ""}`;
+}
+slider.addEventListener("input", () => { $("#pnum").textContent = `${slider.value} / ${st.n}`; });
+slider.addEventListener("change", () => showPage(+slider.value - 1));
+$("#boxBtn").addEventListener("click", () => { settings.boxes = !settings.boxes; kvSet("settings", settings); renderOverlay(); updateChrome(); });
+
+/* layout + zoom */
+function layout() {
+  if (!img.naturalWidth) return;
+  const vw = viewer.clientWidth, vh = viewer.clientHeight;
+  const s = Math.min(vw / img.naturalWidth, vh / img.naturalHeight);
+  const w = img.naturalWidth * s, h = img.naturalHeight * s;
+  st.base = { L: (vw - w) / 2, T: (vh - h) / 2, w, h };
+  stage.style.width = w + "px"; stage.style.height = h + "px";
+  clampZ(); applyZ();
+}
+function applyZ() { const { L, T } = st.base, z = st.z; stage.style.transform = `translate(${L + z.tx}px,${T + z.ty + st.shift}px) scale(${z.z})`; }
+function clampZ() {
+  const z = st.z, { L, T, w, h } = st.base, vw = viewer.clientWidth, vh = viewer.clientHeight;
+  if (z.z <= 1.001) { z.z = 1; z.tx = 0; z.ty = 0; return; }
+  const W = w * z.z, H = h * z.z;
+  z.tx = W > vw ? Math.min(-L, Math.max(vw - W - L, z.tx)) : (vw - W) / 2 - L;
+  z.ty = H > vh ? Math.min(-T, Math.max(vh - H - T, z.ty)) : (vh - H) / 2 - T;
+}
+function zoomAt(sx, sy, nz) {
+  const z = st.z, { L, T } = st.base;
+  const lx = (sx - L - z.tx) / z.z, ly = (sy - T - z.ty - st.shift) / z.z;
+  z.z = Math.max(1, Math.min(4, nz)); z.tx = sx - L - z.z * lx; z.ty = sy - T - st.shift - z.z * ly;
+  clampZ(); applyZ();
+}
+const animZ = () => { stage.classList.add("anim"); applyZ(); setTimeout(() => stage.classList.remove("anim"), 250); };
+new ResizeObserver(() => { if (!reader.hidden) { layout(); if (st.sheet) keepBubbleVisible(); } }).observe(viewer);
+
+/* gestures */
+const ptrs = new Map(); let pd = null, pinch = null, lastTap = 0, tapT = null;
+viewer.addEventListener("pointerdown", e => {
+  ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (ptrs.size === 2) {
+    const [a, b] = [...ptrs.values()];
+    pinch = { d0: Math.hypot(a.x - b.x, a.y - b.y) || 1, z0: st.z.z };
+    if (pd) pd.moved = true; return;
+  }
+  pd = { x: e.clientX, y: e.clientY, tx: st.z.tx, ty: st.z.ty, moved: false, target: e.target };
+});
+viewer.addEventListener("pointermove", e => {
+  if (!ptrs.has(e.pointerId)) return;
+  ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (pinch && ptrs.size >= 2) {
+    const [a, b] = [...ptrs.values()];
+    zoomAt((a.x + b.x) / 2, (a.y + b.y) / 2, pinch.z0 * Math.hypot(a.x - b.x, a.y - b.y) / pinch.d0); return;
+  }
+  if (!pd) return;
+  const dx = e.clientX - pd.x, dy = e.clientY - pd.y;
+  if (Math.abs(dx) + Math.abs(dy) > 10) pd.moved = true;
+  if (st.z.z > 1 && pd.moved) { st.z.tx = pd.tx + dx; st.z.ty = pd.ty + dy; clampZ(); applyZ(); }
+});
+function onUp(e) {
+  if (!ptrs.has(e.pointerId)) return;
+  ptrs.delete(e.pointerId);
+  if (pinch) { if (ptrs.size < 2) { pinch = null; pd = null; if (st.z.z < 1.05) { st.z.z = 1; clampZ(); applyZ(); } } return; }
+  if (!pd) return;
+  const p = pd; pd = null;
+  if (e.type === "pointercancel") return;
+  const dx = e.clientX - p.x, dy = e.clientY - p.y;
+  if (p.moved) {
+    if (st.z.z === 1 && Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.4) (settings.dir === "rtl" ? dx > 0 : dx < 0) ? fwd() : back();
+    return;
+  }
+  const bx = p.target && p.target.closest && p.target.closest(".bx");
+  if (bx) { clearTimeout(tapT); tapT = null; openSheet(+bx.dataset.i); return; }
+  const now = Date.now();
+  if (tapT && now - lastTap < 300) {
+    clearTimeout(tapT); tapT = null;
+    if (st.z.z > 1) { st.z = { z: 1, tx: 0, ty: 0 }; animZ(); } else { stage.classList.add("anim"); zoomAt(e.clientX, e.clientY, 2.2); setTimeout(() => stage.classList.remove("anim"), 250); }
+    return;
+  }
+  lastTap = now; const x = e.clientX;
+  tapT = setTimeout(() => { tapT = null; singleTap(x); }, 260);
+}
+viewer.addEventListener("pointerup", onUp);
+viewer.addEventListener("pointercancel", onUp);
+function singleTap(x) {
+  if (st.sheet) { closeSheet(); return; }
+  const w = viewer.clientWidth;
+  if (st.z.z > 1 || (x > w * 0.3 && x < w * 0.7)) { reader.classList.toggle("hide-chrome"); return; }
+  const leftEdge = x <= w * 0.3;
+  (settings.dir === "rtl" ? leftEdge : !leftEdge) ? fwd() : back();
+}
+document.addEventListener("keydown", e => {
+  if (reader.hidden || !panel.hidden) return;
+  if (e.key === "ArrowLeft") settings.dir === "rtl" ? fwd() : back();
+  else if (e.key === "ArrowRight") settings.dir === "rtl" ? back() : fwd();
+  else if (e.key === "Escape") st.sheet ? closeSheet() : closeReader();
+});
+
+/* overlay */
+function renderOverlay() {
+  overlay.innerHTML = "";
+  const p = curPage();
+  if (!p || !settings.boxes) return;
+  const on = st.sheet ? st.sheet.bi : -1;
+  p.bubbles.forEach((b, i) => {
+    const [x, y, w, h] = b.box; const el = document.createElement("div");
+    el.className = "bx" + (i === on ? " on" : "") + (b.kind === "sfx" ? " sfx" : "");
+    el.style.left = x * 100 + "%"; el.style.top = y * 100 + "%"; el.style.width = w * 100 + "%"; el.style.height = h * 100 + "%";
+    el.dataset.i = i; el.innerHTML = `<i>${i + 1}</i>`;
+    overlay.appendChild(el);
+  });
+}
+
+/* sheet */
+const KANJI = /[㐀-鿿豈-﫿々〆ヶ]/;
+const KANA = /[぀-ヿ]/;
+function rubyHTML(s, r) {
+  let a = 0; while (a < s.length && a < r.length && s[a] === r[a] && KANA.test(s[a])) a++;
+  let b = 0; while (b < s.length - a && b < r.length - a && s[s.length - 1 - b] === r[r.length - 1 - b] && KANA.test(s[s.length - 1 - b])) b++;
+  const mid = s.slice(a, s.length - b), rmid = r.slice(a, r.length - b);
+  if (!mid || !rmid) return esc(s);
+  return esc(s.slice(0, a)) + `<ruby>${esc(mid)}<rt>${esc(rmid)}</rt></ruby>` + esc(s.slice(s.length - b));
+}
+function showFuri(t) {
+  if (!t.r || !KANJI.test(t.s) || settings.furi === "off") return false;
+  if (settings.furi === "all") return true;
+  return !t.lv || t.lv < settings.level;
+}
+const POS = { noun: "noun", pronoun: "pronoun", name: "name", verb: "verb", "i-adj": "い-adjective", "na-adj": "な-adjective", adverb: "adverb", particle: "particle", aux: "auxiliary", conj: "conjunction", interj: "interjection", expr: "expression", counter: "counter", suffix: "suffix", prefix: "prefix", punct: "punctuation" };
+const KIND = { speech: "Speech", thought: "Thought", narration: "Narration", sign: "Sign", sfx: "Sound effect" };
+const vid = t => t.b + "|" + t.r;
+const isSaved = t => st.vocab.some(v => v.id === vid(t));
+
+function openSheet(bi) {
+  const p = curPage(); if (!p || !p.bubbles[bi]) return;
+  st.sheet = { bi, ti: -1, tl: false, note: false };
+  renderSheet(); sheet.classList.add("open"); reader.classList.add("sheet-open"); renderOverlay();
+  requestAnimationFrame(() => requestAnimationFrame(keepBubbleVisible));
+}
+function closeSheet() {
+  if (!st.sheet) return;
+  st.sheet = null; sheet.classList.remove("open"); reader.classList.remove("sheet-open");
+  if (st.shift) { st.shift = 0; animZ(); }
+  renderOverlay();
+}
+function keepBubbleVisible() {
+  const p = curPage(); if (!p || !st.sheet) return;
+  const b = p.bubbles[st.sheet.bi]; const z = st.z, { T, h } = st.base;
+  const top = T + z.ty + z.z * b.box[1] * h, bottom = T + z.ty + z.z * (b.box[1] + b.box[3]) * h;
+  const limit = viewer.clientHeight - sheet.offsetHeight - 14;
+  let shift = 0;
+  if (bottom > limit) { shift = limit - bottom; if (top + shift < 12) shift = 12 - top; }
+  if (shift !== st.shift) { st.shift = shift; animZ(); }
+}
+function cardHTML(t) {
+  const saved = isSaved(t);
+  return `<div class="card">
+    <div class="w jp">${esc(t.b)}${t.lv ? `<span class="chip">N${t.lv}</span>` : ""}</div>
+    <div class="rd">${t.r ? esc(t.r) + " · " : ""}${esc(POS[t.p] || t.p || "word")}${t.s !== t.b ? ` · as written: <span class="jp">${esc(t.s)}</span>` : ""}</div>
+    <div class="g">${esc(t.g || "—")}</div>
+    ${t.n ? `<div class="n">${esc(t.n)}</div>` : ""}
+    <div class="row"><button class="pill ${saved ? "saved" : "pri"}" data-s="save">${saved ? "★ Saved" : "☆ Save word"}</button></div></div>`;
+}
+function renderSheet() {
+  const s = st.sheet; if (!s) return;
+  const p = curPage(); const b = p.bubbles[s.bi]; const n = p.bubbles.length;
+  sheetBody.innerHTML = `
+    <div class="sh-head">
+      <button class="ib" data-s="prevb" ${s.bi === 0 ? "disabled" : ""} aria-label="Previous line"><svg viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg></button>
+      <div class="sh-title">${esc(KIND[b.kind] || b.kind)} · ${s.bi + 1} of ${n}</div>
+      <button class="ib" data-s="nextb" ${s.bi === n - 1 ? "disabled" : ""} aria-label="Next line"><svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></button>
+      <button class="ib" data-s="close" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+    </div>
+    <div class="line jp">${b.tokens.length ? b.tokens.map((t, i) => `<span class="tk p-${esc(t.p)}${i === s.ti ? " on" : ""}" data-t="${i}">${showFuri(t) ? rubyHTML(t.s, t.r) : esc(t.s)}</span>`).join("") : esc(b.text)}</div>
+    ${s.ti >= 0 && b.tokens[s.ti] ? cardHTML(b.tokens[s.ti]) : `<div class="hint">Tap a word for its meaning.</div>`}
+    <div class="acts">
+      <button class="pill" data-s="tl">${s.tl ? "Hide" : "Show"} translation</button>
+      ${b.note ? `<button class="pill" data-s="note">${s.note ? "Hide" : "Show"} grammar</button>` : ""}
+      ${canSpeak ? `<button class="pill" data-s="speak">Listen</button>` : ""}
+    </div>
+    ${s.tl ? `<div class="tl">${esc(b.tl || "—")}</div>` : ""}
+    ${s.note && b.note ? `<div class="note">${esc(b.note)}</div>` : ""}`;
+}
+sheetBody.addEventListener("click", e => {
+  const s = st.sheet; if (!s) return;
+  const tk = e.target.closest("[data-t]");
+  if (tk) { const i = +tk.dataset.t; s.ti = s.ti === i ? -1 : i; renderSheet(); return; }
+  const btn = e.target.closest("[data-s]"); if (!btn) return;
+  const b = curPage().bubbles[s.bi];
+  switch (btn.dataset.s) {
+    case "close": closeSheet(); break;
+    case "prevb": openSheet(s.bi - 1); break;
+    case "nextb": openSheet(s.bi + 1); break;
+    case "tl": s.tl = !s.tl; renderSheet(); break;
+    case "note": s.note = !s.note; renderSheet(); break;
+    case "save": toggleSave(b.tokens[s.ti], b); renderSheet(); break;
+    case "speak": speak(b.text); break;
+  }
+});
+function speak(text) {
+  try {
+    speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text); u.lang = "ja-JP"; u.rate = 0.9;
+    const v = speechSynthesis.getVoices().find(v => /^ja/i.test(v.lang)); if (v) u.voice = v;
+    speechSynthesis.speak(u);
+  } catch { toast("Speech isn't available."); }
+}
+
+/* ================= vocab ================= */
+function toggleSave(t, b) {
+  if (!t) return;
+  const id = vid(t);
+  if (isSaved(t)) st.vocab = st.vocab.filter(v => v.id !== id);
+  else st.vocab.unshift({ id, b: t.b, r: t.r, s: t.s, g: t.g, p: t.p, n: t.n, ctx: b.text, tl: b.tl, vol: st.vol.title, page: st.idx + 1, at: Date.now() });
+  kvSet("vocab", st.vocab);
+}
+function openVocab() {
+  panel.hidden = false;
+  const rows = st.vocab.map((v, i) => `<div class="vrow">
+      <div><div class="vw jp">${esc(v.b)}</div><div class="vr">${esc(v.r)}</div></div>
+      <div style="flex:1;min-width:0"><div class="vg">${esc(v.g)}</div><div class="vc jp">${esc(v.ctx)}</div>
+      <div class="vr">${esc(v.vol || "")}${v.page ? " · p. " + v.page : ""}</div></div>
+      <button class="ib x" data-del="${i}" aria-label="Remove"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>`).join("");
+  panel.innerHTML = `<div class="p-head"><h2>Saved words · ${st.vocab.length}</h2>
+      <button class="ib" data-p="close" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+    <div class="p-body">${st.vocab.length ? `<button class="dk pri" data-p="copy">Copy for Anki (TSV)</button><div id="copyOut"></div>${rows}`
+      : `<p style="color:var(--mute)">Words you save while reading appear here with the line they came from. Copy them to Anki as tab-separated text: word, reading, meaning, sentence, translation.</p>`}</div>`;
+}
+
+/* ================= settings ================= */
+async function openSettings() {
+  panel.hidden = false;
+  const seg = (key, opts) => `<div class="seg">${opts.map(([v, l]) => `<button data-set="${key}" data-val="${v}" class="${String(settings[key]) === String(v) ? "on" : ""}">${l}</button>`).join("")}</div>`;
+  const vols = await all("volumes");
+  let persisted = null; try { persisted = await navigator.storage.persisted(); } catch {}
+  panel.innerHTML = `<div class="p-head"><h2>Settings</h2>
+      <button class="ib" data-p="close" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+    <div class="p-body">
+      <div class="grp"><h3>Your level</h3>${seg("level", [[5, "N5"], [4, "N4"], [3, "N3"], [2, "N2"], [1, "N1"]])}<p>Decides which words get furigana when set to "Above my level".</p></div>
+      <div class="grp"><h3>Furigana</h3>${seg("furi", [["all", "All kanji"], ["above", "Above my level"], ["off", "Off"]])}</div>
+      <div class="grp"><h3>Page direction</h3>${seg("dir", [["rtl", "Right-to-left"], ["ltr", "Left-to-right"]])}<p>Right-to-left is standard manga: tap or swipe from the left edge to go forward.</p></div>
+      <div class="grp"><h3>Volumes on this device</h3>
+        ${vols.length ? vols.map(v => `<div class="vrow"><div style="flex:1"><div class="vg">${esc(v.title)}</div><div class="vr">${v.pageCount} pages · ${fmtBytes(v.bytes || 0)} · ${v.hasPack ? "readings" : "no readings"}</div></div><button class="dk danger" data-delvol="${esc(v.id)}">Remove</button></div>`).join("") : `<p>None yet.</p>`}
+        <p>${persisted === true ? "Storage is protected from automatic clean-up." : "Keep Koma on your Home Screen so iOS doesn't clear its storage."}</p></div>
+      <div class="grp"><h3>About</h3><p>Koma ${APP_VERSION}. Everything is stored on this device and works with no connection.</p></div>
+    </div>`;
+}
+panel.addEventListener("click", async e => {
+  const set = e.target.closest("[data-set]");
+  if (set) {
+    const k = set.dataset.set, v = set.dataset.val;
+    settings[k] = k === "level" ? +v : v; kvSet("settings", settings);
+    openSettings(); if (!reader.hidden) { updateChrome(); if (st.sheet) renderSheet(); }
+    return;
+  }
+  const dv = e.target.closest("[data-delvol]");
+  if (dv) {
+    if (dv.dataset.confirm !== "1") { dv.dataset.confirm = "1"; dv.textContent = "Tap to confirm"; return; }
+    busy("Removing…"); await deleteVolume(dv.dataset.delvol); busy(""); openSettings(); renderLibrary(); return;
+  }
+  const del = e.target.closest("[data-del]");
+  if (del) { st.vocab.splice(+del.dataset.del, 1); kvSet("vocab", st.vocab); openVocab(); return; }
+  const p = e.target.closest("[data-p]"); if (!p) return;
+  if (p.dataset.p === "close") { panel.hidden = true; if (st.sheet) renderSheet(); }
+  else if (p.dataset.p === "copy") {
+    const clean = s => String(s || "").replace(/[\t\n]/g, " ");
+    const tsv = st.vocab.map(v => [v.b, v.r, v.g, v.ctx, v.tl].map(clean).join("\t")).join("\n");
+    try { await navigator.clipboard.writeText(tsv); toast(`Copied ${st.vocab.length} words.`); }
+    catch { $("#copyOut").innerHTML = `<textarea class="copybox" readonly>${esc(tsv)}</textarea>`; const ta = $("#copyOut textarea"); ta.focus(); ta.select(); }
+  }
+});
+
+/* ================= global actions ================= */
+document.addEventListener("click", e => {
+  const a = e.target.closest("[data-act]"); if (!a) return;
+  ({ import: () => fileIn.click(), vocab: openVocab, settings: openSettings, "close-reader": closeReader })[a.dataset.act]?.();
+});
+
+/* ================= boot ================= */
+const APP_VERSION = "1.0.0";
+(async () => {
+  settings = { ...DEF, ...(await kvGet("settings", {})) };
+  st.vocab = await kvGet("vocab", []);
+  try { if (navigator.storage && navigator.storage.persist) await navigator.storage.persist(); } catch {}
+  renderLibrary();
+})();
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("sw.js").then(reg => {
+    reg.update().catch(() => {});
+    reg.addEventListener("updatefound", () => {
+      const nw = reg.installing;
+      nw && nw.addEventListener("statechange", () => {
+        if (nw.state === "installed" && navigator.serviceWorker.controller)
+          toast("Update ready. Tap to reload.", () => nw.postMessage("skipWaiting"));
+      });
+    });
+  }).catch(() => {});
+  let reloaded = false;
+  navigator.serviceWorker.addEventListener("controllerchange", () => { if (!reloaded) { reloaded = true; location.reload(); } });
+}
+})();
+</script>
+</body>
+</html>
