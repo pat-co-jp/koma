@@ -179,7 +179,7 @@ textarea.copybox{width:100%;height:160px;background:var(--panel);color:var(--tex
 <section id="panel" hidden></section>
 <div id="busy" hidden><div><div class="spin"></div><div id="busyTxt">Working…</div></div></div>
 <div id="toast"></div>
-<input id="file" type="file" multiple hidden accept=".cbz,.zip,.json,application/zip,application/json,application/x-cbz,application/vnd.comicbook+zip">
+<input id="file" type="file" multiple hidden>
 
 <script>
 (() => {
@@ -292,6 +292,8 @@ fileIn.addEventListener("change", async () => {
   const files = [...fileIn.files]; fileIn.value = "";
   if (!files.length) return;
   const archives = files.filter(f => /\.(cbz|zip)$/i.test(f.name));
+  const other = files.filter(f => !/\.(cbz|zip|json)$/i.test(f.name));
+  if (other.length) toast(`Skipped ${other.length} file(s): Koma imports .cbz, .zip and .koma.json.`);
   const packs = [];
   for (const f of files.filter(f => /\.json$/i.test(f.name))) {
     try { const j = JSON.parse(await f.text()); if (j.format === "koma-pack") packs.push({ file: f, pack: j }); else toast(`${f.name} isn't a Koma reading pack.`); }
@@ -670,7 +672,7 @@ document.addEventListener("click", e => {
 });
 
 /* ================= boot ================= */
-const APP_VERSION = "1.0.0";
+const APP_VERSION = "1.0.1";
 (async () => {
   settings = { ...DEF, ...(await kvGet("settings", {})) };
   st.vocab = await kvGet("vocab", []);
