@@ -61,6 +61,10 @@ button:disabled{opacity:.35;cursor:default}
 .get{position:absolute;right:6px;bottom:6px;font-size:11.5px;font-weight:700;padding:4px 10px;border-radius:999px;background:var(--accent);color:#fff}
 .get.have{background:rgba(14,14,16,.82);color:var(--gold)}
 .get.busy{background:rgba(14,14,16,.88);color:var(--text)}
+.get.raw{background:#2f2f36;color:var(--text);border:1px solid var(--line)}
+.badge.proc{color:#9ecbff}
+.badge.fail{color:#ff8a7a}
+.rnote{font-size:12px;color:var(--mute);margin-top:2px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .field{display:block;width:100%;margin:6px 0 12px;padding:11px 12px;border-radius:10px;background:var(--panel);border:1px solid var(--line);color:var(--text);font:14px/1.3 ui-monospace,monospace}
 .err{font-size:13px;background:#2a1616;border:1px solid #5a2323;color:#f3b8ad;border-radius:12px;padding:10px 12px;margin-bottom:14px}
 
@@ -288,7 +292,7 @@ async function renderLibrary() {
     const pct = v.pageCount ? Math.round(((v.lastPage || 0) + 1) / v.pageCount * 100) : 0;
     return `<button class="vol" data-vol="${esc(v.id)}">
       <div class="cv">${(await coverUrl(v)) ? `<img src="${await coverUrl(v)}" alt="">` : ""}</div>
-      <span class="badge ${v.hasPack ? "" : "none"}">${v.hasPack ? "読 " + v.bubbles : "no readings"}</span>
+      <span class="badge ${v.hasPack ? "" : v.repoId ? "proc" : "none"}">${v.hasPack ? "読 " + v.bubbles : v.repoId ? "readings pending" : "no readings"}</span>
       <div class="t">${esc(v.title)}</div>
       <div class="m">${v.lastReadAt ? `p. ${(v.lastPage || 0) + 1} / ${v.pageCount}` : `${v.pageCount} pages`}</div>
       <div class="bar"><i style="width:${v.lastReadAt ? pct : 0}%"></i></div></button>`;
@@ -368,14 +372,24 @@ async function importArchive(file, id, pack) {
   if (pack) await attachPack(vol, pack);
   return vol;
 }
-async function attachPack(vol, pack) {
+async function attachPack(vol, pack, packUpdated) {
   if (pack.version > 1) toast("This pack is from a newer pipeline. Update the app if anything looks wrong.");
+  const cur = (await get("volumes", vol.id)) || vol;   // freshest copy: keeps lastPage / lastReadAt
+  const open = st.vol && st.vol.id === cur.id && !reader.hidden;
+  if (open) { cur.lastPage = st.idx; cur.lastReadAt = Date.now(); }   // the page on screen beats a pending save
   const byName = new Map(pack.pages.map(p => [p.name, p]));
-  const pages = vol.names.map((n, i) => byName.get(n) || pack.pages[i] || { bubbles: [] });
+  const pages = cur.names.map((n, i) => byName.get(n) || pack.pages[i] || { bubbles: [] });
   const bubbles = pages.reduce((s, p) => s + (p.bubbles ? p.bubbles.length : 0), 0);
-  await put("packs", { vol: vol.id, pages, level: pack.level, model: pack.model, created: pack.created });
-  vol.hasPack = true; vol.bubbles = bubbles; vol.title = pack.title || vol.title;
-  await put("volumes", vol);
+  await put("packs", { vol: cur.id, pages, level: pack.level, model: pack.model, created: pack.created });
+  cur.hasPack = true; cur.bubbles = bubbles; cur.packUpdated = packUpdated || pack.created || "";
+  if (pack.title && !cur.repoId) cur.title = pack.title;
+  await put("volumes", cur);
+  Object.assign(vol, cur);
+  if (st.vol && st.vol.id === cur.id) {          // reading it right now: light the boxes up in place
+    st.vol = cur; st.pack = pages;
+    if (open) { renderOverlay(); updateChrome(); }
+  }
+  return cur;
 }
 async function deleteVolume(id) {
   await tx(["pages", "packs", "volumes"], "readwrite", t => {
@@ -646,6 +660,7 @@ function repoFetch(path, init = {}) {
 function netMsg(e, r) {
   if (r && (r.status === 401 || r.status === 403)) return "The repository rejected the access token. Check it, or remove and re-add the repository.";
   if (r) return `The repository answered HTTP ${r.status}.`;
+  if (!navigator.onLine) return "You're offline. Volumes already on this phone still read normally.";
   if (repo && /^http:/i.test(repo.url) && location.protocol === "https:") return "Can't reach the repository. iOS blocks plain http:// links from an https app, so the host needs https.";
   return "Can't reach the repository. Check you're online, the host is up, and it allows requests from this app (CORS).";
 }
@@ -658,8 +673,43 @@ async function loadRepoIndex() {
     const j = await r.json();
     if (j.format !== "koma-repo") throw new Error("format");
     repoIndex = j;
+    syncPacks(false).then(n => { if (n && libTab === "device" && !$("#lib").hidden) renderLibrary(); });
   } catch (e) { repoErr = e.message === "format" ? "That address doesn't serve a Koma catalogue." : netMsg(e, r && !r.ok ? r : null); }
 }
+const repoState = v => v.status || (v.pack ? "ready" : "none");
+let packSyncing = false;
+async function syncPacks(quiet) {
+  // Attaches reading packs that finished on the PC to volumes already on this phone, keeping reading progress.
+  if (packSyncing || !repoIndex) return 0;
+  packSyncing = true; let n = 0;
+  try {
+    const locals = await all("volumes");
+    for (const v of repoIndex.volumes) {
+      if (repoState(v) !== "ready" || !v.pack) continue;
+      const lv = locals.find(x => x.repoId === v.id || x.id === v.id);
+      if (!lv || (lv.hasPack && (!v.packUpdated || lv.packUpdated === v.packUpdated))) continue;
+      try {
+        const r = await repoFetch(v.pack); if (!r.ok) continue;
+        await attachPack(lv, await r.json(), v.packUpdated);
+        n++;
+        if (!quiet || n === 1) toast(`Readings added to ${lv.title}.`);
+      } catch (e) { console.warn("pack sync", v.title, e); }
+    }
+  } finally { packSyncing = false; }
+  return n;
+}
+let liveT = null;
+function scheduleLive() {
+  clearTimeout(liveT);
+  const busy = repoIndex && repoIndex.volumes.some(v => repoState(v) === "processing");
+  if (!busy) return;
+  liveT = setTimeout(async () => {
+    if (document.hidden || !repo) return scheduleLive();
+    await loadRepoIndex(); await syncPacks(true);
+    if (libTab === "repo" && !$("#lib").hidden) renderRepo(); else scheduleLive();
+  }, 60000);
+}
+document.addEventListener("visibilitychange", () => { if (!document.hidden && repo && repoIndex) scheduleLive(); });
 async function repoCover(v) {
   if (!v.cover) return "";
   if (repoCovers.has(v.id)) return repoCovers.get(v.id);
@@ -690,16 +740,27 @@ async function renderRepo() {
   if (!vols.length) { body.innerHTML = head + `<div class="empty"><p>The repository is empty. Volumes appear here once the laptop finishes processing them.</p></div>`; return; }
   const cards = await Promise.all(vols.map(async v => {
     const localId = local.get(v.id), have = !!localId, busyPct = repoBusy.get(v.id);
+    const state = repoState(v);
     const btn = busyPct != null ? `<span class="get busy">${busyPct}%</span>`
-      : have ? `<span class="get have">On phone</span>` : `<span class="get" data-get="${esc(v.id)}">Get</span>`;
+      : have ? `<span class="get have">On phone</span>`
+      : state === "ready" ? `<span class="get" data-get="${esc(v.id)}">Get</span>`
+      : `<span class="get raw" data-get="${esc(v.id)}">Read raw</span>`;
+    const pr = v.progress && v.progress.total ? Math.round(v.progress.done / v.progress.total * 100) : null;
+    const badge = state === "ready" ? `<span class="badge">読 ${v.bubbles ?? ""}</span>`
+      : state === "failed" ? `<span class="badge fail">Failed</span>`
+      : state === "processing" ? `<span class="badge proc">Processing on PC${pr != null ? " · " + pr + "%" : ""}</span>`
+      : `<span class="badge none">no readings</span>`;
+    const sub = state === "failed" && v.detail ? `<div class="rnote">${esc(v.detail)}</div>`
+      : state === "ready" && have ? `<div class="rnote">Readings ready</div>` : "";
     const cu = await repoCover(v);
     return `<div class="vol" ${have ? `data-vol="${esc(localId)}"` : ""}>
       <div class="cv">${cu ? `<img src="${cu}" alt="">` : ""}${btn}</div>
-      ${v.pack ? `<span class="badge">読 ${v.bubbles ?? ""}</span>` : `<span class="badge none">no readings</span>`}
+      ${badge}
       <div class="t">${esc(v.title)}</div>
-      <div class="m">${v.pages ? v.pages + " pages · " : ""}${fmtBytes(v.bytes || 0)}</div></div>`;
+      <div class="m">${v.pages ? v.pages + " pages · " : ""}${fmtBytes(v.bytes || 0)}</div>${sub}</div>`;
   }));
   body.innerHTML = head + `<div class="grid">${cards.join("")}</div>${await footer()}`;
+  scheduleLive();
 }
 async function repoAction(a) {
   if (a === "add-file") fileIn.click();
@@ -727,13 +788,15 @@ async function downloadFromRepo(id) {
     }
     const file = new File(chunks, v.cbz.split("/").pop(), { type: "application/zip" });
     let pack = null;
-    if (v.pack) { const pr = await repoFetch(v.pack); if (pr.ok) pack = await pr.json(); }
+    if (v.pack && repoState(v) === "ready") { const pr = await repoFetch(v.pack); if (pr.ok) pack = await pr.json(); }
     repoBusy.set(id, 99); renderRepo();
     busy(`Adding ${v.title}…`);
     const realId = await sha16(file);
-    const vol = await importArchive(file, realId, pack);
-    vol.repoId = v.id; await put("volumes", vol);
-    toast(`${v.title} is on your phone and reads offline.`);
+    const vol = await importArchive(file, realId, null);
+    vol.repoId = v.id; vol.title = v.title; await put("volumes", vol);
+    if (pack) await attachPack(vol, pack, v.packUpdated);
+    toast(pack ? `${v.title} is on your phone and reads offline.`
+               : `${v.title} is on your phone (raw). Readings attach automatically when the PC finishes.`);
   } catch (e) {
     console.error(e);
     toast(e && e.message === "http" ? netMsg(e, r) : /quota/i.test(String(e && e.name)) ? "Not enough storage on this device." : netMsg(e));
@@ -811,12 +874,14 @@ document.addEventListener("click", e => {
 });
 
 /* ================= boot ================= */
-const APP_VERSION = "1.1.1";
+const APP_VERSION = "1.2.0";
 (async () => {
   settings = { ...DEF, ...(await kvGet("settings", {})) };
   st.vocab = await kvGet("vocab", []);
   try { if (navigator.storage && navigator.storage.persist) await navigator.storage.persist(); } catch {}
   renderLibrary();
+  repo = await kvGet("repo", null);
+  if (repo && navigator.onLine) loadRepoIndex().then(() => scheduleLive());
 })();
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("sw.js").then(reg => {

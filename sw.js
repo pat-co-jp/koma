@@ -1,6 +1,6 @@
 /* Koma service worker: caches the app shell so the reader opens with no connection.
    Bump VERSION on every release; the page offers a reload when a new version is ready. */
-const VERSION = "koma-v1.1.1";
+const VERSION = "koma-v1.2.0";
 const SHELL = [
   "./",
   "./index.html",
@@ -31,6 +31,8 @@ self.addEventListener("fetch", e => {
   const req = e.request;
   if (req.method !== "GET") return;
   const url = new URL(req.url);
+  // Network-only for everything off this origin: repository catalogues, covers, volumes and packs
+  // always come live from the host and are never cached here.
   if (url.origin !== self.location.origin) return;
   // Navigations: cached shell first, so the app opens offline.
   if (req.mode === "navigate") {
