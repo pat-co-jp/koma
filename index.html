@@ -39,7 +39,7 @@ button:disabled{opacity:.35;cursor:default}
 .lib-body{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:6px calc(var(--sr) + 16px) calc(var(--sb) + 30px) calc(var(--sl) + 16px)}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(132px,1fr));gap:16px}
 .vol{position:relative;text-align:left;display:block;width:100%}
-.vol .cv{aspect-ratio:1/1.42;border-radius:10px;overflow:hidden;background:var(--panel);border:1px solid var(--line)}
+.vol .cv{position:relative;aspect-ratio:1/1.42;border-radius:10px;overflow:hidden;background:var(--panel);border:1px solid var(--line)}
 .vol .cv img{width:100%;height:100%;object-fit:cover;display:block}
 .vol .t{font-size:13.5px;font-weight:600;margin-top:7px;line-height:1.25;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .vol .m{font-size:12px;color:var(--mute);margin-top:2px}
@@ -52,6 +52,17 @@ button:disabled{opacity:.35;cursor:default}
 .empty ol{padding-left:18px}
 .empty li{margin:6px 0}
 .foot{color:var(--mute);font-size:12px;margin-top:26px;text-align:center}
+.tabs{display:flex;gap:6px;padding:0 calc(var(--sr) + 16px) 8px calc(var(--sl) + 16px)}
+.tabs button{padding:7px 14px;border-radius:999px;font-size:13.5px;color:var(--mute);background:var(--panel);border:1px solid var(--line)}
+.tabs button.on{color:var(--text);background:#2f2f36;font-weight:600}
+.rhead{display:flex;align-items:center;gap:8px;margin:2px 0 14px;color:var(--mute);font-size:13px}
+.rhead b{color:var(--text);font-size:14px}
+.rhead span{flex:1}
+.get{position:absolute;right:6px;bottom:6px;font-size:11.5px;font-weight:700;padding:4px 10px;border-radius:999px;background:var(--accent);color:#fff}
+.get.have{background:rgba(14,14,16,.82);color:var(--gold)}
+.get.busy{background:rgba(14,14,16,.88);color:var(--text)}
+.field{display:block;width:100%;margin:6px 0 12px;padding:11px 12px;border-radius:10px;background:var(--panel);border:1px solid var(--line);color:var(--text);font:14px/1.3 ui-monospace,monospace}
+.err{font-size:13px;background:#2a1616;border:1px solid #5a2323;color:#f3b8ad;border-radius:12px;padding:10px 12px;margin-bottom:14px}
 
 /* ---------- reader ---------- */
 #reader{position:fixed;inset:0;z-index:20;background:var(--ink)}
@@ -156,6 +167,7 @@ textarea.copybox{width:100%;height:160px;background:var(--panel);color:var(--tex
     <button class="ib" data-act="vocab" aria-label="Saved words"><svg viewBox="0 0 24 24"><path d="M6 3h12v18l-6-4-6 4z"/></svg></button>
     <button class="ib" data-act="settings" aria-label="Settings"><svg viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg></button>
   </div>
+  <div class="tabs"><button class="on" data-tab="device">On this phone</button><button data-tab="repo">Repository</button></div>
   <div class="lib-body" id="libBody"></div>
 </section>
 
@@ -253,8 +265,16 @@ async function coverUrl(vol) {
   const u = p ? URL.createObjectURL(p.blob) : "";
   coverUrls.set(vol.id, u); return u;
 }
-function fmtBytes(b) { return b > 1e9 ? (b / 1e9).toFixed(1) + " GB" : (b / 1e6).toFixed(0) + " MB"; }
+function fmtBytes(b) { return b >= 1e9 ? (b / 1e9).toFixed(1) + " GB" : b >= 1e6 ? (b / 1e6).toFixed(0) + " MB" : Math.max(1, Math.round(b / 1e3)) + " KB"; }
+let libTab = "device";
+document.querySelector(".tabs").addEventListener("click", e => {
+  const b = e.target.closest("[data-tab]"); if (!b) return;
+  libTab = b.dataset.tab;
+  document.querySelectorAll(".tabs button").forEach(x => x.classList.toggle("on", x === b));
+  renderLibrary();
+});
 async function renderLibrary() {
+  if (libTab === "repo") return renderRepo();
   const vols = (await all("volumes")).sort((a, b) => (b.lastReadAt || b.addedAt) - (a.lastReadAt || a.addedAt));
   const body = $("#libBody");
   if (!vols.length) {
@@ -280,7 +300,11 @@ async function footer() {
   try { const e = await navigator.storage.estimate(); s = `Using ${fmtBytes(e.usage || 0)} on this device`; } catch {}
   return `<div class="foot">${s}${s ? " · " : ""}Koma ${APP_VERSION}</div>`;
 }
-$("#libBody").addEventListener("click", e => { const v = e.target.closest("[data-vol]"); if (v) openVolume(v.dataset.vol); });
+$("#libBody").addEventListener("click", e => {
+  const g = e.target.closest("[data-get]"); if (g) { downloadFromRepo(g.dataset.get); return; }
+  const v = e.target.closest("[data-vol]"); if (v) openVolume(v.dataset.vol);
+  const a = e.target.closest("[data-repo]"); if (a) repoAction(a.dataset.repo);
+});
 
 /* ================= import ================= */
 async function sha16(blob) {
@@ -296,7 +320,12 @@ fileIn.addEventListener("change", async () => {
   if (other.length) toast(`Skipped ${other.length} file(s): Koma imports .cbz, .zip and .koma.json.`);
   const packs = [];
   for (const f of files.filter(f => /\.json$/i.test(f.name))) {
-    try { const j = JSON.parse(await f.text()); if (j.format === "koma-pack") packs.push({ file: f, pack: j }); else toast(`${f.name} isn't a Koma reading pack.`); }
+    try {
+      const j = JSON.parse(await f.text());
+      if (j.format === "koma-pack") packs.push({ file: f, pack: j });
+      else if (j.format === "koma-repo-config" && j.url) { await saveRepo(j); toast(`Repository added: ${j.name || j.url}`); }
+      else toast(`${f.name} isn't a Koma reading pack or repository file.`);
+    }
     catch { toast(`Couldn't read ${f.name}.`); }
   }
   try {
@@ -333,10 +362,11 @@ async function importArchive(file, id, pack) {
   const prev = await get("volumes", id);
   const vol = { id, title: (pack && pack.title) || stemOf(file.name), names, pageCount: names.length, bytes: file.size,
     addedAt: prev ? prev.addedAt : Date.now(), lastPage: prev ? prev.lastPage : 0, lastReadAt: prev ? prev.lastReadAt : 0,
-    hasPack: false, bubbles: 0 };
+    hasPack: false, bubbles: 0, repoId: prev ? prev.repoId : undefined };
   await put("volumes", vol);
   coverUrls.delete(id);
   if (pack) await attachPack(vol, pack);
+  return vol;
 }
 async function attachPack(vol, pack) {
   if (pack.version > 1) toast("This pack is from a newer pipeline. Update the app if anything looks wrong.");
@@ -601,6 +631,115 @@ function speak(text) {
   } catch { toast("Speech isn't available."); }
 }
 
+/* ================= repository (your own digitised library, served by the laptop) ================= */
+let repo = null, repoIndex = null, repoErr = "";
+const repoCovers = new Map(), repoBusy = new Map();
+async function saveRepo(cfg) {
+  let url = String(cfg.url).trim(); if (!url.endsWith("/")) url += "/";
+  repo = { name: cfg.name || new URL(url).host, url, token: String(cfg.token || "").trim() };
+  await kvSet("repo", repo); repoIndex = null; repoCovers.clear();
+}
+function repoFetch(path, init = {}) {
+  return fetch(new URL(path.split("/").map(encodeURIComponent).join("/"), repo.url), {
+    ...init, cache: "no-store", headers: { ...(repo.token ? { Authorization: "Bearer " + repo.token } : {}), ...(init.headers || {}) } });
+}
+function netMsg(e, r) {
+  if (r && (r.status === 401 || r.status === 403)) return "The repository rejected the access token. Check it, or remove and re-add the repository.";
+  if (r) return `The repository answered HTTP ${r.status}.`;
+  return "Can't reach the repository. Check you're online, the host is up, and it allows requests from this app (CORS).";
+}
+async function loadRepoIndex() {
+  repoErr = "";
+  let r;
+  try {
+    r = await repoFetch("index.json");
+    if (!r.ok) throw new Error("http");
+    const j = await r.json();
+    if (j.format !== "koma-repo") throw new Error("format");
+    repoIndex = j;
+  } catch (e) { repoErr = e.message === "format" ? "That address doesn't serve a Koma catalogue." : netMsg(e, r && !r.ok ? r : null); }
+}
+async function repoCover(v) {
+  if (!v.cover) return "";
+  if (repoCovers.has(v.id)) return repoCovers.get(v.id);
+  try { const r = await repoFetch(v.cover); if (!r.ok) return ""; const u = URL.createObjectURL(await r.blob()); repoCovers.set(v.id, u); return u; }
+  catch { return ""; }
+}
+async function renderRepo() {
+  const body = $("#libBody");
+  repo = repo || await kvGet("repo", null);
+  if (!repo) {
+    body.innerHTML = `<div class="empty">
+      <p>Add the link to a repository that hosts your digitised volumes. Koma shows its catalogue here, and downloads a volume to this phone with one tap.</p>
+      <input class="field" id="repoUrl" type="url" inputmode="url" placeholder="https://your-host.example/koma/" autocapitalize="off" autocorrect="off" spellcheck="false">
+      <input class="field" id="repoName" placeholder="Name (optional)" autocapitalize="words">
+      <input class="field" id="repoTok" placeholder="Access token (optional)" autocapitalize="off" autocorrect="off" spellcheck="false">
+      <button class="big" data-repo="add-manual">Add repository</button>
+      <p>Or <button class="dk" data-repo="add-file">import a repository file</button> (a <b>.json</b> with <code>"format": "koma-repo-config"</code>, <code>url</code>, optional <code>name</code> and <code>token</code>).</p>
+      <p>The link must be <b>https</b> and serve <code>index.json</code> in Koma's catalogue format.</p></div>`;
+    return;
+  }
+  if (!repoIndex && !repoErr) { body.innerHTML = `<div class="empty"><p>Loading ${esc(repo.name)}…</p></div>`; await loadRepoIndex(); }
+  const local = new Map();
+  for (const lv of await all("volumes")) { local.set(lv.id, lv.id); if (lv.repoId) local.set(lv.repoId, lv.id); }
+  const head = `<div class="rhead"><span><b>${esc(repo.name)}</b>${repoIndex ? ` · ${repoIndex.volumes.length} volume${repoIndex.volumes.length === 1 ? "" : "s"}` : ""}</span>
+    <button class="dk" data-repo="refresh">Refresh</button><button class="dk" data-repo="remove">Remove</button></div>`;
+  if (repoErr) { body.innerHTML = head + `<div class="err">${esc(repoErr)}</div>`; return; }
+  const vols = repoIndex.volumes;
+  if (!vols.length) { body.innerHTML = head + `<div class="empty"><p>The repository is empty. Volumes appear here once the laptop finishes processing them.</p></div>`; return; }
+  const cards = await Promise.all(vols.map(async v => {
+    const localId = local.get(v.id), have = !!localId, busyPct = repoBusy.get(v.id);
+    const btn = busyPct != null ? `<span class="get busy">${busyPct}%</span>`
+      : have ? `<span class="get have">On phone</span>` : `<span class="get" data-get="${esc(v.id)}">Get</span>`;
+    const cu = await repoCover(v);
+    return `<div class="vol" ${have ? `data-vol="${esc(localId)}"` : ""}>
+      <div class="cv">${cu ? `<img src="${cu}" alt="">` : ""}${btn}</div>
+      ${v.pack ? `<span class="badge">読 ${v.bubbles ?? ""}</span>` : `<span class="badge none">no readings</span>`}
+      <div class="t">${esc(v.title)}</div>
+      <div class="m">${v.pages ? v.pages + " pages · " : ""}${fmtBytes(v.bytes || 0)}</div></div>`;
+  }));
+  body.innerHTML = head + `<div class="grid">${cards.join("")}</div>${await footer()}`;
+}
+async function repoAction(a) {
+  if (a === "add-file") fileIn.click();
+  else if (a === "add-manual") {
+    const url = $("#repoUrl").value.trim(), token = $("#repoTok").value.trim(), name = $("#repoName").value.trim();
+    if (!/^https:\/\//i.test(url) && !/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?\//i.test(url)) { toast("The repository link must start with https://"); return; }
+    try { new URL(url); } catch { toast("That isn't a valid link."); return; }
+    await saveRepo({ url, token, name: name || undefined }); renderRepo();
+  } else if (a === "refresh") { repoIndex = null; repoErr = ""; renderRepo(); }
+  else if (a === "remove") { repo = null; repoIndex = null; repoErr = ""; repoCovers.clear(); await tx(["kv"], "readwrite", t => { t.objectStore("kv").delete("repo"); }); renderRepo(); }
+}
+async function downloadFromRepo(id) {
+  const v = repoIndex && repoIndex.volumes.find(x => x.id === id);
+  if (!v || repoBusy.has(id)) return;
+  repoBusy.set(id, 0); renderRepo();
+  let r;
+  try {
+    r = await repoFetch(v.cbz);
+    if (!r.ok) throw new Error("http");
+    const total = +r.headers.get("content-length") || v.bytes || 0;
+    const reader = r.body.getReader(); const chunks = []; let got = 0, lastPaint = 0;
+    for (;;) {
+      const { done, value } = await reader.read(); if (done) break;
+      chunks.push(value); got += value.length;
+      if (total && Date.now() - lastPaint > 400) { lastPaint = Date.now(); repoBusy.set(id, Math.min(99, Math.round(got / total * 100))); renderRepo(); }
+    }
+    const file = new File(chunks, v.cbz.split("/").pop(), { type: "application/zip" });
+    let pack = null;
+    if (v.pack) { const pr = await repoFetch(v.pack); if (pr.ok) pack = await pr.json(); }
+    repoBusy.set(id, 99); renderRepo();
+    busy(`Adding ${v.title}…`);
+    const realId = await sha16(file);
+    const vol = await importArchive(file, realId, pack);
+    vol.repoId = v.id; await put("volumes", vol);
+    toast(`${v.title} is on your phone and reads offline.`);
+  } catch (e) {
+    console.error(e);
+    toast(e && e.message === "http" ? netMsg(e, r) : /quota/i.test(String(e && e.name)) ? "Not enough storage on this device." : netMsg(e));
+  } finally { repoBusy.delete(id); busy(""); renderRepo(); }
+}
+
 /* ================= vocab ================= */
 function toggleSave(t, b) {
   if (!t) return;
@@ -672,7 +811,7 @@ document.addEventListener("click", e => {
 });
 
 /* ================= boot ================= */
-const APP_VERSION = "1.0.1";
+const APP_VERSION = "1.1.0";
 (async () => {
   settings = { ...DEF, ...(await kvGet("settings", {})) };
   st.vocab = await kvGet("vocab", []);
