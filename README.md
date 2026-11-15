@@ -51,15 +51,16 @@ and covers, so serving that folder as `<base>` is enough.
 - `id`: any stable string. The pipeline uses the first 16 hex characters of the archive's SHA-256.
 - `pack`, `cover`, `pages`, `bubbles`, `bytes`, `added` are optional.
 
-### Host requirements
+### Compatibility notes
 
-| Requirement | Why |
+These aren't Koma rules; iOS and the browser enforce them, and a host that misses them won't load.
+
+| Need | Why |
 |---|---|
-| HTTPS with a certificate iOS trusts | The app is served over HTTPS; iOS blocks plain-HTTP requests from it |
-| `Access-Control-Allow-Origin: https://pat-co-jp.github.io` | The app runs on that origin |
-| If using a token: `Access-Control-Allow-Headers: Authorization`, answer `OPTIONS` preflight with 2xx and no auth | The token is sent as `Authorization: Bearer <token>`, which triggers a preflight |
+| HTTPS with a certificate iOS trusts | The app is served over HTTPS, and iOS blocks plain-HTTP requests from it |
+| `Access-Control-Allow-Origin: https://pat-co-jp.github.io` | The app runs on that origin; without it the browser blocks the response |
+| With a token: `Access-Control-Allow-Headers: Authorization`, and a 2xx answer to `OPTIONS` without auth | The token is sent as `Authorization: Bearer <token>`, which triggers a preflight |
 | `Access-Control-Expose-Headers: Content-Length` (optional) | Download progress percentage |
-| Keep it private | These are personal format-shifted copies: protect the host (token, private network or both), never make it public |
 
 ### Repository file (optional)
 

@@ -646,6 +646,7 @@ function repoFetch(path, init = {}) {
 function netMsg(e, r) {
   if (r && (r.status === 401 || r.status === 403)) return "The repository rejected the access token. Check it, or remove and re-add the repository.";
   if (r) return `The repository answered HTTP ${r.status}.`;
+  if (repo && /^http:/i.test(repo.url) && location.protocol === "https:") return "Can't reach the repository. iOS blocks plain http:// links from an https app, so the host needs https.";
   return "Can't reach the repository. Check you're online, the host is up, and it allows requests from this app (CORS).";
 }
 async function loadRepoIndex() {
@@ -676,7 +677,7 @@ async function renderRepo() {
       <input class="field" id="repoTok" placeholder="Access token (optional)" autocapitalize="off" autocorrect="off" spellcheck="false">
       <button class="big" data-repo="add-manual">Add repository</button>
       <p>Or <button class="dk" data-repo="add-file">import a repository file</button> (a <b>.json</b> with <code>"format": "koma-repo-config"</code>, <code>url</code>, optional <code>name</code> and <code>token</code>).</p>
-      <p>The link must be <b>https</b> and serve <code>index.json</code> in Koma's catalogue format.</p></div>`;
+      <p>The link should serve <code>index.json</code> in Koma's catalogue format.</p></div>`;
     return;
   }
   if (!repoIndex && !repoErr) { body.innerHTML = `<div class="empty"><p>Loading ${esc(repo.name)}…</p></div>`; await loadRepoIndex(); }
@@ -704,8 +705,7 @@ async function repoAction(a) {
   if (a === "add-file") fileIn.click();
   else if (a === "add-manual") {
     const url = $("#repoUrl").value.trim(), token = $("#repoTok").value.trim(), name = $("#repoName").value.trim();
-    if (!/^https:\/\//i.test(url) && !/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?\//i.test(url)) { toast("The repository link must start with https://"); return; }
-    try { new URL(url); } catch { toast("That isn't a valid link."); return; }
+    try { if (!/^https?:$/i.test(new URL(url).protocol)) throw 0; } catch { toast("That isn't a valid web link."); return; }
     await saveRepo({ url, token, name: name || undefined }); renderRepo();
   } else if (a === "refresh") { repoIndex = null; repoErr = ""; renderRepo(); }
   else if (a === "remove") { repo = null; repoIndex = null; repoErr = ""; repoCovers.clear(); await tx(["kv"], "readwrite", t => { t.objectStore("kv").delete("repo"); }); renderRepo(); }
@@ -811,7 +811,7 @@ document.addEventListener("click", e => {
 });
 
 /* ================= boot ================= */
-const APP_VERSION = "1.1.0";
+const APP_VERSION = "1.1.1";
 (async () => {
   settings = { ...DEF, ...(await kvGet("settings", {})) };
   st.vocab = await kvGet("vocab", []);
