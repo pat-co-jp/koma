@@ -112,7 +112,9 @@ select.field option{color:#111;background:#fff}
 /* phone closed (1.2.6): the outer screen shows the book's cover, nothing else */
 #closed{position:fixed;inset:0;z-index:200;display:flex;align-items:center;justify-content:center;perspective:1800px;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
 #closed[hidden]{display:none}
-#closed::before{content:"";position:absolute;inset:0;background:radial-gradient(120% 85% at 50% 38%,#232229,#09090b 72%)}
+#closed::before{content:"";position:absolute;inset:0;background:radial-gradient(120% 85% at 50% 38%,#232229,#09090b 72%);opacity:var(--bk,1)}
+#closed.turning:has(.glc) .book{visibility:hidden}
+#closed .glc{z-index:1}
 #closed .book{position:relative;z-index:0;transform-origin:100% 50%;-webkit-backface-visibility:hidden;backface-visibility:hidden;filter:drop-shadow(0 22px 34px rgba(0,0,0,.6)) drop-shadow(0 3px 6px rgba(0,0,0,.45))}
 #closed.ltr .book{transform-origin:0 50%}
 #closed .edges{position:absolute;z-index:-1;top:5px;bottom:5px;left:-6px;width:12px;border-radius:4px 0 0 4px;background:repeating-linear-gradient(to right,#ece7da 0 1px,#cfc7b6 1px 2px)}
@@ -295,7 +297,7 @@ button,select,input,[data-vol],[data-olmanga]{touch-action:manipulation}
 </section>
 
 <section id="panel" hidden></section>
-<div id="closed" hidden aria-label="Book cover"><div class="book"><div class="edges"></div><div class="face"></div></div><div class="tip">Open the phone to read. Touch and hold to use Koma on this screen.</div></div>
+<div id="closed" hidden aria-label="Book cover"><div class="book"><div class="edges"></div><div class="face"></div></div><div class="tip">Turn the cover to open it (swipe, or tap its edge), or open the phone.</div></div>
 <div id="busy" hidden><div><div class="spin"></div><div id="busyTxt">Working…</div></div></div>
 <div id="toast"></div>
 <input id="file" type="file" multiple hidden>
@@ -546,9 +548,9 @@ async function deleteVolume(id) {
 /* ================= reader ================= */
 async function openVolume(id) {
   const vol = await get("volumes", id); if (!vol) return;
-  // 1.2.8: picked on the closed phone's outer screen: you're now holding this book, so its cover shows
-  // (before the pages do). Opening the phone opens it; touch and hold reads it here.
-  if (coverMode()) { peek = false; await setClosed(true, vol); }
+  // picked on the closed phone's outer screen: you're now holding this book, so its cover shows (before the
+  // pages do). Turn the cover or open the phone to read it.
+  if (coverMode()) await coverShow(vol);
   turnReset(); nbClear();
   const pk = await get("packs", id);
   st.vol = vol; st.pack = pk ? pk.pages : null; st.n = vol.pageCount;
@@ -565,6 +567,7 @@ function closeReader() {
   if (st.url) { URL.revokeObjectURL(st.url); st.url = null; }
   if (st.url2) { URL.revokeObjectURL(st.url2); st.url2 = null; }
   st.unit = null;
+  if (coverUp && !closedEl.hidden) coverShow();          // (cover up while leaving: show Koma's cover)
   renderLibrary();
 }
 
@@ -631,13 +634,13 @@ function refreshSpread() {               // after a rotation, a setting change o
 }
 
 /* ---- fold-aware screens (1.2.6). Safari has no fold sensor, so the window's shape tells the screens apart:
-   iPhone Duo closed = outer screen, 466 x 678 pt (aspect ~1.45): the cover of the book, nothing else.
-   Open in landscape (~951 x 669 pt): two pages. Open in portrait, or any other portrait screen: one page. ---- */
-let screenMode = "single", peek = false;
+   iPhone Duo closed = outer screen (the cover of the book in your hands). Open in landscape: two pages.
+   Open in portrait, or any other portrait screen: one page. ---- */
+let screenMode = "single";
 // 1.2.7: the outer screen's real window size didn't match Apple's published 466 x 678 pt, so the rule no longer
 // depends on exact sizes. The Duo's screens are nearly square (aspect ~1.42-1.45) where every other iPhone is
 // ~2.17, so a window narrower than 600 pt on a nearly square display (window or screen) is the closed phone.
-// Settings > About shows the measured sizes and the detected mode.
+// Settings > About shows the measured sizes, the detected mode and the last few changes.
 function detectMode() {
   const w = innerWidth, h = innerHeight, s = Math.min(w, h), l = Math.max(w, h);
   const ss = Math.min(screen.width, screen.height) || s, sl = Math.max(screen.width, screen.height) || l;
@@ -646,65 +649,97 @@ function detectMode() {
   if (w > h && h >= 500 && w >= 800) return "spread";
   return "single";
 }
-const screenInfo = () => `Screen ${screen.width} × ${screen.height} pt · window ${innerWidth} × ${innerHeight} pt · ${screenMode === "cover" ? "phone closed" : screenMode === "spread" ? "two pages" : "one page"}`;
+const modeName = m => m === "cover" ? "phone closed" : m === "spread" ? "two pages" : "one page";
+const screenInfo = () => `Screen ${screen.width} × ${screen.height} pt · window ${innerWidth} × ${innerHeight} pt · ${modeName(screenMode)}`;
+const modeLog = [];
+function scrInfoPaint() {
+  const si = document.getElementById("scrInfo"); if (si) si.textContent = screenInfo();
+  const sl = document.getElementById("scrLog"); if (sl) sl.textContent = modeLog.length ? "Recent: " + modeLog.join(" · ") : "";
+}
+
+/* ---- the book on the outer screen (1.2.9) ----
+   With the phone closed, the outer screen shows the cover of the book in your hands until you open it:
+   no volume open → Koma's own cover (the library is inside); a volume open → that volume's cover.
+   Two ways in: turn the cover (drag it, or tap its free edge: the same curl as a page) or open the phone.
+   The cover comes back when Koma starts on the outer screen and each time the phone is closed. Picking a volume on
+   the outer screen hands you that book, so its cover shows. Leaving the volume puts Koma's cover in your hands.
+   Nothing opens the cover by itself (1.2.8 opened a book when it saw a passing size at launch). ---- */
 const closedEl = $("#closed");
-// The book on the cover: the volume given, else the one open in the reader, else the most recently read.
-// closedVol remembers it, so opening the phone opens that book (1.2.8).
-let closedVol = null;
+let coverUp = false, coverBook = "", komaCover = "";
+const bookVol = () => (!reader.hidden && st.vol) ? st.vol : null;
+const coverMode = () => screenMode === "cover" && settings.outer !== "read";
+function komaCoverUrl() {                                  // Koma's cover, drawn once (also the curl's texture)
+  if (komaCover) return komaCover;
+  const c = document.createElement("canvas"); c.width = 700; c.height = 1000;
+  const x = c.getContext("2d");
+  const g = x.createLinearGradient(0, 0, 700, 1000); g.addColorStop(0, "#2f2e36"); g.addColorStop(1, "#121115");
+  x.fillStyle = g; x.fillRect(0, 0, 700, 1000);
+  x.strokeStyle = "rgba(242,193,78,.32)"; x.lineWidth = 3; x.strokeRect(48, 48, 604, 904);
+  x.textAlign = "center"; x.textBaseline = "middle";
+  x.fillStyle = "#f2c14e"; x.font = '700 230px "Hiragino Mincho ProN", "Yu Mincho", serif';
+  x.fillText("読", 350, 450);
+  x.fillStyle = "rgba(243,239,230,.78)"; x.font = '600 44px system-ui, -apple-system, "Segoe UI", sans-serif';
+  [..."KOMA"].forEach((ch, i) => x.fillText(ch, 350 + (i - 1.5) * 60, 680));
+  return (komaCover = c.toDataURL("image/png"));
+}
 async function paintClosed(vol) {
-  vol = vol || (st.vol && !reader.hidden ? st.vol : null);
-  if (!vol) { const vols = await all("volumes"); vol = vols.filter(v => v.lastReadAt).sort((a, b) => b.lastReadAt - a.lastReadAt)[0] || null; }
-  const u = vol ? await coverUrl(vol) : "";
-  closedVol = vol ? vol.id : null;
+  const u = vol ? await coverUrl(vol) : komaCoverUrl();
+  coverBook = vol ? vol.id : "koma";
+  closedEl.dataset.book = coverBook;
   closedEl.classList.toggle("ltr", settings.dir === "ltr");
-  closedEl.querySelector(".face").innerHTML = u
-    ? `<img src="${u}" alt=""><i class="spine"></i><i class="sheen"></i>`
-    : `<div class="blank"><b>読</b><span>Koma</span></div><i class="spine"></i><i class="sheen"></i>`;
-  const im = closedEl.querySelector("img");
-  if (im) try { await im.decode(); } catch {}
+  closedEl.querySelector(".face").innerHTML = `<img src="${u}" alt=""><i class="spine"></i><i class="sheen"></i>`;
+  try { await closedEl.querySelector(".face img").decode(); } catch {}
 }
 let closedSeq = 0;
-async function setClosed(on, vol) {
-  if (on) {
-    const my = ++closedSeq;
-    if (tn) turnLand();
-    closeSheet();
-    closedEl.classList.remove("opening");
-    const want = vol || (st.vol && !reader.hidden ? st.vol : null);
-    if (closedEl.hidden || (want && want.id !== closedVol)) { await paintClosed(want); if (my !== closedSeq) return; }
-    closedEl.hidden = false;
-    return;
-  }
-  if (closedEl.hidden) { ++closedSeq; return; }
-  if (closedEl.classList.contains("opening")) return;     // already swinging open
+// Put the cover of the book in hand on the outer screen (vol: hand over this volume).
+async function coverShow(vol) {
+  const my = ++closedSeq;
+  coverUp = true;
+  if (tn) turnLand();
+  ctReset();
+  closeSheet();
+  closedEl.classList.remove("opening", "hinting");
+  vol = vol || bookVol();
+  if (closedEl.hidden || (vol ? vol.id : "koma") !== coverBook) { await paintClosed(vol); if (my !== closedSeq) return; }
+  closedEl.hidden = false;
+}
+function coverHide() { ++closedSeq; coverUp = false; ctReset(); closedEl.classList.remove("opening", "hinting"); closedEl.hidden = true; }
+// The phone was opened with the cover up: it swings open on its spine onto the library or the pages.
+function coverSwing() {
+  coverUp = false;
+  if (closedEl.hidden || closedEl.classList.contains("opening")) return;
+  ctReset();
   const my = ++closedSeq;
   closedEl.classList.remove("hinting");
-  if (reader.hidden || matchMedia("(prefers-reduced-motion: reduce)").matches) { closedEl.hidden = true; return; }
-  closedEl.classList.add("opening");                      // the cover swings open on its spine
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) { closedEl.hidden = true; return; }
+  closedEl.classList.add("opening");
   setTimeout(() => { if (my === closedSeq) { closedEl.hidden = true; closedEl.classList.remove("opening"); } }, 640);
 }
-const coverMode = () => screenMode === "cover" && settings.outer !== "read";
-let scrBusy = false, scrAgain = false;
-async function applyScreen() {
-  if (scrBusy) { scrAgain = true; return; }               // one at a time: opening a book on unfold is async
-  scrBusy = true;
-  try {
-    const m = detectMode(), was = screenMode;
-    if (m !== "cover") peek = false;
-    screenMode = m;
-    const show = m === "cover" && settings.outer !== "read" && !peek;
-    // 1.2.8: the phone was opened on a closed book that isn't open in the reader yet (Koma was started on the
-    // outer screen, or closed while in the library): open that book, then let the cover swing open onto it.
-    if (was === "cover" && m !== "cover" && !closedEl.hidden && reader.hidden && panel.hidden && closedVol) {
-      try { await openVolume(closedVol); } catch (e) { console.warn(e); }
-    }
-    setClosed(show);
-    refreshSpread();
-    const si = document.getElementById("scrInfo"); if (si) si.textContent = screenInfo();
-  } finally {
-    scrBusy = false;
-    if (scrAgain) { scrAgain = false; applyScreen(); }
+
+// A fold only counts once the new shape has held for SETTLE ms: iOS can report a passing size while Koma is
+// launching or the phone is moving, and 1.2.8 reacted to one at launch. Rotations on the inner screen apply at once.
+const SETTLE = 450;
+let screenReady = false, pend = null, pendT = 0;
+function applyScreen() {
+  const m = detectMode();
+  if (screenReady && m !== screenMode && (m === "cover" || screenMode === "cover")) {
+    const now = performance.now();
+    if (!pend || pend.m !== m) pend = { m, t: now };
+    const left = SETTLE - (now - pend.t);
+    if (left > 0) { clearTimeout(pendT); pendT = setTimeout(applyScreen, left + 15); scrInfoPaint(); return; }
   }
+  pend = null; clearTimeout(pendT);
+  const was = screenMode, first = !screenReady;
+  screenReady = true; screenMode = m;
+  if (first || m !== was) {
+    modeLog.push(`${new Date().toTimeString().slice(0, 8)} ${modeName(m)} ${innerWidth}×${innerHeight}`);
+    if (modeLog.length > 5) modeLog.shift();
+  }
+  if (coverMode()) { if (first || was !== "cover") coverShow(); }   // closed (or started closed): the cover
+  else if (!closedEl.hidden) coverSwing();                          // opened: it swings open
+  else coverUp = false;
+  refreshSpread();
+  scrInfoPaint();
 }
 // 1.2.8: folding doesn't always arrive as a resize event in a Home Screen app, so several signals trigger a check,
 // and a light poll (four numbers, every 400 ms while visible) catches a size change that came with no event at all.
@@ -717,20 +752,124 @@ addEventListener("pageshow", rescreen);
 document.addEventListener("visibilitychange", () => { if (!document.hidden) { lastGeo = geo(); applyScreen(); } });
 if (window.visualViewport) visualViewport.addEventListener("resize", rescreen);
 setInterval(() => { if (document.hidden) return; const g = geo(); if (g !== lastGeo) { lastGeo = g; applyScreen(); } }, 400);
-// Touch and hold lifts the cover so Koma can be used on the outer screen (pick another volume: its cover then
-// shows; hold again to read here). A tap shows a short hint and nothing else.
-let holdT = 0, held = false, hintT = 0;
-closedEl.addEventListener("pointerdown", () => {
-  held = false; clearTimeout(holdT);
-  holdT = setTimeout(() => { held = true; peek = true; applyScreen(); }, 650);
-});
-closedEl.addEventListener("pointerup", () => {
-  clearTimeout(holdT);
-  if (held || closedEl.hidden || closedEl.classList.contains("opening")) return;
+
+/* ---- turning the cover (1.2.9): the same curl as a page turn (geometry, thresholds, easing, flick), drawn over the
+   live library or reader in a transparent WebGL layer, so what's inside is revealed as the cover lifts.
+   Without WebGL the cover swings open on its spine instead. ---- */
+let ct = null, cpd = null, hintT = 0;
+const coverFace = () => closedEl.querySelector(".face");
+function ctBegin(fy) {
+  const r = coverFace().getBoundingClientRect(), ltr = settings.dir === "ltr", tap = fy == null;
+  const im = closedEl.querySelector(".face img");
+  ct = { forward: true, spread: false, k: 0.5, ltr, p: 0, raf: 0, rq: 0, released: false, motion: ltr ? -1 : 1,
+         fy0: tap ? r.top + r.height * 0.84 : fy, fy: tap ? r.top + r.height * 0.76 : fy };
+  if (im && im.naturalWidth && coverCurl.init()) {
+    ct.gl = true;
+    coverCurl.scene(im, { L: r.left, T: r.top, w: r.width, h: r.height }, null,
+                    { L: 0, T: 0, w: closedEl.clientWidth, h: closedEl.clientHeight }, null);
+    closedEl.appendChild(coverCurl.canvas());
+  }
+  closedEl.classList.add("turning");
+  closedEl.classList.remove("hinting");
+  ctRender();
+  return ct;
+}
+function ctRender() {
+  if (!ct) return;
+  const s = Math.max(0, Math.min(1, ct.released ? ct.p : ct.k * ct.p));
+  closedEl.style.setProperty("--bk", (1 - Math.min(1, s * 1.6)).toFixed(3));   // the backdrop fades as the cover lifts
+  if (ct.gl) {
+    const g = curlParams(ct, coverCurl.rect());
+    g.through = 0; g.gut = 1;                                // plain endpaper inside; shade at the spine
+    coverCurl.draw(g);
+  } else {
+    const b = closedEl.querySelector(".book");
+    b.style.transform = `rotateY(${(ct.ltr ? -1 : 1) * 100 * s}deg)`;
+    b.style.opacity = String(1 - 0.65 * s);
+  }
+}
+function ctAnimate(to, speed) {
+  const my = ct;
+  return new Promise(res => {
+    if (!my) return res(false);
+    my.goal = to;
+    const from = my.p, dist = Math.abs(to - from) * closedEl.clientWidth;
+    let dur = speed > 0.3 ? dist / (speed * 1.15) : 240 + 200 * Math.abs(to - from);
+    dur = Math.max(130, Math.min(dur, 430));
+    const t0 = performance.now();
+    const step = now => {
+      if (ct !== my) return res(false);
+      const k = Math.min(1, (now - t0) / dur), ease = 1 - Math.pow(1 - k, 3);
+      my.p = from + (to - from) * ease; ctRender();
+      if (k < 1) my.raf = requestAnimationFrame(step); else res(true);
+    };
+    my.raf = requestAnimationFrame(step);
+  });
+}
+function ctReset() {
+  if (ct) { cancelAnimationFrame(ct.raf); cancelAnimationFrame(ct.rq); }
+  ct = null;
+  const c = coverCurl.canvas(); if (c && c.parentNode === closedEl) c.remove();
+  closedEl.classList.remove("turning"); closedEl.style.removeProperty("--bk");
+  const b = closedEl.querySelector(".book"); b.style.transform = ""; b.style.opacity = "";
+  coverCurl.clear();
+}
+function ctOpened() { ++closedSeq; coverUp = false; closedEl.hidden = true; ctReset(); }   // inside the book now
+async function ctRelease(vx, cancel) {
+  const my = ct; if (!my) return;
+  const v = vx * my.motion;
+  const done = !cancel && (v > 0.3 || (my.p > 0.4 && v > -0.15));
+  if (!my.released) { my.p *= my.k; my.released = true; my.relP = my.p; }
+  const ok = await ctAnimate(done ? 1 : 0, Math.abs(vx));
+  if (!ok || ct !== my) return;
+  if (done) ctOpened(); else ctReset();
+}
+async function ctTap() {
+  if (ct) return;
+  ctBegin(null);
+  ct.released = true;
+  const my = ct, ok = await ctAnimate(1, 0);
+  if (ok && ct === my) ctOpened();
+}
+function coverHint() {
   closedEl.classList.add("hinting"); clearTimeout(hintT);
   hintT = setTimeout(() => closedEl.classList.remove("hinting"), 2600);
+}
+closedEl.addEventListener("pointerdown", e => {
+  if (closedEl.classList.contains("opening") || (ct && !ct.drag)) return;   // swinging or animating
+  cpd = { id: e.pointerId, x: e.clientX, y: e.clientY, hist: [[e.clientX, e.timeStamp]], turning: false };
+  try { closedEl.setPointerCapture(e.pointerId); } catch {}
 });
-for (const t of ["pointercancel", "pointerleave"]) closedEl.addEventListener(t, () => clearTimeout(holdT));
+closedEl.addEventListener("pointermove", e => {
+  if (!cpd || e.pointerId !== cpd.id) return;
+  const dx = e.clientX - cpd.x, dy = e.clientY - cpd.y, fw = settings.dir === "ltr" ? -1 : 1;
+  if (!cpd.turning) {
+    if (!(Math.abs(dx) > 8 && Math.abs(dx) > Math.abs(dy) * 1.2 && dx * fw > 0)) return;
+    ctBegin(cpd.y); ct.drag = true; cpd.turning = true; cpd.hist = [[e.clientX, e.timeStamp]];
+  }
+  cpd.hist.push([e.clientX, e.timeStamp]); if (cpd.hist.length > 10) cpd.hist.shift();
+  const my = ct; if (!my) return;
+  my.fy = e.clientY;
+  my.p = Math.max(0, Math.min(1, dx * my.motion / closedEl.clientWidth));
+  if (!my.rq) my.rq = requestAnimationFrame(() => { my.rq = 0; if (ct === my && !my.released) ctRender(); });
+});
+function coverUp_(e) {
+  if (!cpd || e.pointerId !== cpd.id) return;
+  const p = cpd; cpd = null;
+  const cancel = e.type === "pointercancel";
+  if (p.turning) {
+    if (ct) ct.drag = false;
+    ctRelease(cancel ? 0 : flickVx(p.hist.concat([[e.clientX, e.timeStamp]])), cancel);
+    return;
+  }
+  if (cancel || Math.abs(e.clientX - p.x) + Math.abs(e.clientY - p.y) > 10) return;
+  // a tap on the cover's free edge turns it; anywhere else shows how to open it
+  const r = coverFace().getBoundingClientRect(), ltr = settings.dir === "ltr";
+  const free = ltr ? e.clientX > r.left + r.width * 0.55 : e.clientX < r.left + r.width * 0.45;
+  if (free) ctTap(); else coverHint();
+}
+closedEl.addEventListener("pointerup", coverUp_);
+closedEl.addEventListener("pointercancel", coverUp_);
 closedEl.addEventListener("contextmenu", e => e.preventDefault());
 
 let seq = 0, saveT;
@@ -841,7 +980,7 @@ function makePane(pg, back, extra) {
    cylinder; the page corner follows the finger in 2D, so the fold tilts when the finger moves up or down.
    The underside shows the back of the paper with the ink faintly mirrored through, the roll is lit, and
    the curl throws a soft shadow on the page below. Falls back to the CSS fold without WebGL. ---- */
-const glCurl = (() => {
+function makeCurl(opt) {
   let cv = null, gl = null, prog = null, failed = false, U = {}, aPos = -1;
   let meshBuf = null, idxBuf = null, nIdx = 0, meshKey = "", quadBuf = null, quadBufS = null;
   let texMov = null, texUnd = null, texBack = null, texStat = null, rMov = null, rUnd = null, sp = null;
@@ -877,7 +1016,7 @@ void main() {
 precision highp float;
 uniform sampler2D uTex; uniform sampler2D uBack;
 uniform float uUnder; uniform float uStatic; uniform float uDim; uniform float uShadow; uniform float uR;
-uniform float uBackOn; uniform float uGut; uniform vec2 uN; uniform vec4 uMov;
+uniform float uBackOn; uniform float uGut; uniform vec2 uN; uniform vec4 uMov; uniform float uShadowOnly; uniform float uThrough;
 varying vec2 vUV; varying vec2 vUVb; varying vec2 vQ; varying float vA; varying float vD;
 const float PI = 3.14159265;
 float gutter() { return 1.0 - uGut * 0.14 * (1.0 - smoothstep(0.0, 36.0, abs(vQ.x))); }   // binding shade (spreads)
@@ -894,6 +1033,7 @@ void main() {
   }
   if (uUnder > 0.5) {
     float sh = 1.0 - smoothstep(uR * 0.5, uR * 0.5 + 70.0, vD);
+    if (uShadowOnly > 0.5) { gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0 - (1.0 - 0.42 * sh * uShadow) * (1.0 - uDim)); return; }
     c *= (1.0 - 0.42 * sh * uShadow) * (1.0 - uDim) * gutter();
     gl_FragColor = vec4(c, 1.0);
     return;
@@ -909,7 +1049,7 @@ void main() {
     vec3 b = (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) ? vec3(1.0) : texture2D(uBack, uv).rgb;
     gl_FragColor = vec4(b * (0.70 + 0.30 * (-ca)) * gutter(), 1.0);
   } else {
-    vec3 b = mix(vec3(0.957, 0.945, 0.918), c, 0.12);
+    vec3 b = mix(vec3(0.957, 0.945, 0.918), c, uThrough);
     gl_FragColor = vec4(b * (0.70 + 0.30 * (-ca)), 1.0);
   }
 }`;
@@ -918,7 +1058,7 @@ void main() {
     if (failed) return false;
     try {
       cv = document.createElement("canvas"); cv.className = "glc";
-      gl = cv.getContext("webgl", { antialias: true, alpha: false, premultipliedAlpha: false });
+      gl = cv.getContext("webgl", { antialias: true, alpha: !!opt.alpha, premultipliedAlpha: false });
       if (!gl) throw new Error("no webgl");
       const sh = (type, src) => {
         const o = gl.createShader(type); gl.shaderSource(o, src); gl.compileShader(o);
@@ -932,12 +1072,12 @@ void main() {
       gl.useProgram(prog);
       aPos = gl.getAttribLocation(prog, "aPos");
       for (const n of ["uView", "uRect", "uMov", "uMirror", "uP", "uN", "uR", "uCurl", "uZ", "uTex", "uUnder", "uDim", "uShadow",
-                       "uBack", "uBackRect", "uSpine", "uBackOn", "uGut", "uStatic"])
+                       "uBack", "uBackRect", "uSpine", "uBackOn", "uGut", "uStatic", "uShadowOnly", "uThrough"])
         U[n] = gl.getUniformLocation(prog, n);
       meshBuf = gl.createBuffer(); idxBuf = gl.createBuffer(); quadBuf = gl.createBuffer(); quadBufS = gl.createBuffer();
       cv.addEventListener("webglcontextlost", e => {
         e.preventDefault(); gl = null; failed = true;
-        if (tn && tn.gl) { tn.gl = false; turnBuild(); renderTurn(); }
+        if (opt.lost) opt.lost();
       });
       return true;
     } catch (e) {
@@ -1016,11 +1156,13 @@ void main() {
     if (sp && sp.stat) quad(quadBufS, sp.stat.r);
   }
   function draw(g) {                                        // g: { mirror, P, N, R, dim, shadow }
-    const dpr = Math.min(2, window.devicePixelRatio || 1), vw = viewer.clientWidth, vh = viewer.clientHeight;
+    const dpr = Math.min(2, window.devicePixelRatio || 1), [vw, vh] = opt.size();
     const W = Math.round(vw * dpr), H = Math.round(vh * dpr);
     if (cv.width !== W || cv.height !== H) { cv.width = W; cv.height = H; }
     gl.viewport(0, 0, W, H);
-    gl.clearColor(14 / 255, 14 / 255, 16 / 255, 1); gl.clearDepth(1);
+    if (opt.alpha) { gl.clearColor(0, 0, 0, 0); gl.enable(gl.BLEND); gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA); }
+    else gl.clearColor(14 / 255, 14 / 255, 16 / 255, 1);
+    gl.clearDepth(1);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
     gl.enable(gl.DEPTH_TEST); gl.depthFunc(gl.LEQUAL); gl.disable(gl.CULL_FACE);
     gl.useProgram(prog);
@@ -1030,7 +1172,8 @@ void main() {
     gl.uniform2f(U.uP, g.P[0], g.P[1]); gl.uniform2f(U.uN, g.N[0], g.N[1]); gl.uniform1f(U.uR, g.R);
     const br = sp ? sp.back.r : rMov;
     gl.uniform4f(U.uBackRect, br.L, br.T, br.w, br.h);
-    gl.uniform1f(U.uSpine, sp ? sp.spine : 0); gl.uniform1f(U.uBackOn, sp ? 1 : 0); gl.uniform1f(U.uGut, sp ? 1 : 0);
+    gl.uniform1f(U.uSpine, sp ? sp.spine : 0); gl.uniform1f(U.uBackOn, sp ? 1 : 0); gl.uniform1f(U.uGut, sp || g.gut ? 1 : 0);
+    gl.uniform1f(U.uShadowOnly, opt.alpha ? 1 : 0); gl.uniform1f(U.uThrough, g.through ?? 0.12);
     gl.uniform1i(U.uBack, 1); gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, texBack || texMov);
     gl.uniform1i(U.uTex, 0); gl.activeTexture(gl.TEXTURE0);
     gl.enableVertexAttribArray(aPos);
@@ -1062,12 +1205,19 @@ void main() {
   }
   function clear() { texMov = texUnd = texBack = texStat = null; sp = null; }   // textures stay cached for the next turn
   return { init, scene, draw, clear, warm, flush, canvas: () => cv, rect: () => rMov };
-})();
-function glRender() {
+}
+// Page curl instances: the reader's (opaque, over the viewer) and the cover's (1.2.9: transparent, over the outer
+// screen, drawing only the turning cover and its shadow so the live library or reader shows through).
+const glCurl = makeCurl({ alpha: false, size: () => [viewer.clientWidth, viewer.clientHeight],
+                          lost: () => { if (tn && tn.gl) { tn.gl = false; turnBuild(); renderTurn(); } } });
+const coverCurl = makeCurl({ alpha: true, size: () => [closedEl.clientWidth, closedEl.clientHeight],
+                             lost: () => { if (ct) { ct.gl = false; const c = coverCurl.canvas(); if (c) c.remove(); ctRender(); } } });
+function glRender() { glCurl.draw(curlParams(tn, glCurl.rect())); }
+function curlParams(t, m) {
   // Corner-follows-finger geometry: the corner starts on the free edge at the touch height and travels
   // past the spine as the turn completes (s 0 -> 1). The fold axis is the perpendicular bisector of the
   // corner's start and current positions, kept off the spine so the page never tears from the binding.
-  const t = tn, m = glCurl.rect(), w = m.w, h = m.h;
+  const w = m.w, h = m.h;
   // Spread: the leaf turns over the spine and lands on the far half, so the corner travels 2w, the roll
   // tightens to nothing as it lands, and the corner tracks the finger 1:1 (single page: half speed).
   const sRaw = t.released ? t.p : t.k * t.p;
@@ -1095,7 +1245,7 @@ function glRender() {
   // mirror = the leaf's spine is on its right. Single page and forward spread turns in RTL; a back turn in a spread
   // grabs the page on the other side of the spine.
   const mirror = t.spread && !t.forward ? t.ltr : !t.ltr;
-  glCurl.draw({ mirror, P, N, R, dim: 0.22 * (1 - s), shadow });
+  return { mirror, P, N, R, dim: 0.22 * (1 - s), shadow };
 }
 function turnBegin(forward, fy) {
   const tg = turnTarget(forward), target = tg.i, ltr = settings.dir === "ltr", spread = !!(st.spread && st.units);
@@ -2021,11 +2171,11 @@ async function openSettings() {
       <div class="grp"><h3>Page direction</h3>${seg("dir", [["rtl", "Right-to-left"], ["ltr", "Left-to-right"]])}<p>Right-to-left is standard manga: tap or swipe from the left edge to go forward.</p></div>
       <div class="grp"><h3>Page turn</h3>${seg("turn", [["curl", "Curl"], ["slide", "Slide"], ["none", "None"]])}<p>Curl and Slide follow your finger like Apple Books: drag part-way to peek, let go to turn or flick to turn quickly. Tapping the side edges turns too.</p></div>
       <div class="grp"><h3>Two pages</h3>${seg("spread", [["auto", "Open in landscape"], ["off", "Never"]])}${seg("coverAlone", [["on", "Cover on its own"], ["off", "Pair the cover"]])}<p>With the iPhone Duo open in landscape (or an iPad), Koma shows two pages like an open book and the left page turns over the spine. In portrait it shows one page. If facing pages look mismatched, switch "Pair the cover".</p></div>
-      <div class="grp"><h3>Phone closed</h3>${seg("outer", [["cover", "Show the cover"], ["read", "Keep reading"]])}<p>With the iPhone Duo closed, the outer screen shows only the cover of your book, and opening the phone opens it. Touch and hold the cover to use Koma on the outer screen: pick another volume and its cover appears; hold again to read it there.</p></div>
+      <div class="grp"><h3>Phone closed</h3>${seg("outer", [["cover", "Show the cover"], ["read", "Keep reading"]])}<p>With the iPhone Duo closed, the outer screen shows a cover until you open it: Koma's cover with the library inside, or the cover of the volume you have open. Turn the cover (swipe, or tap its edge) or open the phone to go in.</p></div>
       <div class="grp"><h3>Volumes on this device</h3>
         ${vols.length ? vols.map(v => `<div class="vrow"><div style="flex:1"><div class="vg">${esc(v.title)}</div><div class="vr">${v.pageCount} pages · ${fmtBytes(v.bytes || 0)} · ${v.hasPack ? "readings" : "no readings"}</div></div><button class="dk danger" data-delvol="${esc(v.id)}">Remove</button></div>`).join("") : `<p>None yet.</p>`}
         <p>${persisted === true ? "Storage is protected from automatic clean-up." : "Keep Koma on your Home Screen so iOS doesn't clear its storage."}</p></div>
-      <div class="grp"><h3>About</h3><p>Koma ${APP_VERSION}. Everything is stored on this device and works with no connection.</p><p id="scrInfo">${screenInfo()}</p>
+      <div class="grp"><h3>About</h3><p>Koma ${APP_VERSION}. Everything is stored on this device and works with no connection.</p><p id="scrInfo">${screenInfo()}</p><p id="scrLog">${modeLog.length ? "Recent: " + esc(modeLog.join(" · ")) : ""}</p>
         ${updateWorker ? `<p><button class="dk pri" data-p="update">Update now</button> A new version is downloaded and ready.</p>` : ""}</div>
     </div>`;
 }
@@ -2036,6 +2186,7 @@ panel.addEventListener("click", async e => {
     settings[k] = k === "level" ? +v : v; kvSet("settings", settings);
     openSettings(); if (!reader.hidden) { updateChrome(); if (st.sheet) renderSheet(); }
     if (["spread", "coverAlone", "dir", "outer"].includes(k)) applyScreen();
+    if (k === "outer") { if (coverMode()) coverShow(); else if (!closedEl.hidden) coverHide(); }
     return;
   }
   const dv = e.target.closest("[data-delvol]");
@@ -2063,7 +2214,7 @@ document.addEventListener("click", e => {
 });
 
 /* ================= boot ================= */
-const APP_VERSION = "1.2.8";
+const APP_VERSION = "1.2.9";
 (async () => {
   settings = { ...DEF, ...(await kvGet("settings", {})) };
   st.vocab = await kvGet("vocab", []);
