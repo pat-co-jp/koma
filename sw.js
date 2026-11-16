@@ -1,6 +1,6 @@
 /* Koma service worker: caches the app shell so the reader opens with no connection.
    Bump VERSION on every release; the page offers a reload when a new version is ready. */
-const VERSION = "koma-v1.2.2";
+const VERSION = "koma-v1.2.3";
 const SHELL = [
   "./",
   "./index.html",
@@ -12,7 +12,9 @@ const SHELL = [
 ];
 
 self.addEventListener("install", e => {
-  e.waitUntil(caches.open(VERSION).then(c => c.addAll(SHELL)));
+  // cache: "reload" skips the browser's HTTP cache (GitHub Pages allows 10 minutes), so a new version
+  // never gets stored with the previous release's files.
+  e.waitUntil(caches.open(VERSION).then(c => c.addAll(SHELL.map(u => new Request(u, { cache: "reload" })))));
 });
 
 self.addEventListener("activate", e => {

@@ -298,9 +298,16 @@ const fileIn = $("#file");
 const canSpeak = "speechSynthesis" in window && typeof SpeechSynthesisUtterance !== "undefined";
 
 let toastT;
-function toast(msg, action) {
+let updateWorker = null;
+function applyUpdate() { if (updateWorker) updateWorker.postMessage("skipWaiting"); }
+function offerUpdate(w) {
+  updateWorker = w;
+  toast("Update ready. Tap to reload.", applyUpdate, true);
+}
+function toast(msg, action, sticky) {
   const t = $("#toast"); t.innerHTML = esc(msg); t.classList.toggle("act", !!action); t.onclick = action || null;
-  t.classList.add("on"); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove("on"), action ? 8000 : 2600);
+  t.classList.add("on"); clearTimeout(toastT);
+  if (!sticky) toastT = setTimeout(() => { t.classList.remove("on"); if (updateWorker) offerUpdate(updateWorker); }, action ? 8000 : 2600);
 }
 function busy(msg) { const b = $("#busy"); if (!msg) { b.hidden = true; return; } $("#busyTxt").textContent = msg; b.hidden = false; }
 
@@ -1361,7 +1368,8 @@ async function openSettings() {
       <div class="grp"><h3>Volumes on this device</h3>
         ${vols.length ? vols.map(v => `<div class="vrow"><div style="flex:1"><div class="vg">${esc(v.title)}</div><div class="vr">${v.pageCount} pages · ${fmtBytes(v.bytes || 0)} · ${v.hasPack ? "readings" : "no readings"}</div></div><button class="dk danger" data-delvol="${esc(v.id)}">Remove</button></div>`).join("") : `<p>None yet.</p>`}
         <p>${persisted === true ? "Storage is protected from automatic clean-up." : "Keep Koma on your Home Screen so iOS doesn't clear its storage."}</p></div>
-      <div class="grp"><h3>About</h3><p>Koma ${APP_VERSION}. Everything is stored on this device and works with no connection.</p></div>
+      <div class="grp"><h3>About</h3><p>Koma ${APP_VERSION}. Everything is stored on this device and works with no connection.</p>
+        ${updateWorker ? `<p><button class="dk pri" data-p="update">Update now</button> A new version is downloaded and ready.</p>` : ""}</div>
     </div>`;
 }
 panel.addEventListener("click", async e => {
@@ -1381,6 +1389,7 @@ panel.addEventListener("click", async e => {
   if (del) { st.vocab.splice(+del.dataset.del, 1); kvSet("vocab", st.vocab); openVocab(); return; }
   const p = e.target.closest("[data-p]"); if (!p) return;
   if (p.dataset.p === "close") { panel.hidden = true; if (st.sheet) renderSheet(); }
+  else if (p.dataset.p === "update") applyUpdate();
   else if (p.dataset.p === "copy") {
     const clean = s => String(s || "").replace(/[\t\n]/g, " ");
     const tsv = st.vocab.map(v => [v.b, v.r, v.g, v.ctx, v.tl].map(clean).join("\t")).join("\n");
@@ -1396,7 +1405,7 @@ document.addEventListener("click", e => {
 });
 
 /* ================= boot ================= */
-const APP_VERSION = "1.2.2";
+const APP_VERSION = "1.2.3";
 (async () => {
   settings = { ...DEF, ...(await kvGet("settings", {})) };
   st.vocab = await kvGet("vocab", []);
@@ -1409,14 +1418,18 @@ const APP_VERSION = "1.2.2";
 })();
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("sw.js").then(reg => {
+    // 1.2.3: an update that was downloaded earlier but never applied is offered again on every start,
+    // the offer stays until tapped, and Settings › About gets an "Update now" button.
+    if (reg.waiting && navigator.serviceWorker.controller) offerUpdate(reg.waiting);
     reg.update().catch(() => {});
     reg.addEventListener("updatefound", () => {
       const nw = reg.installing;
       nw && nw.addEventListener("statechange", () => {
-        if (nw.state === "installed" && navigator.serviceWorker.controller)
-          toast("Update ready. Tap to reload.", () => nw.postMessage("skipWaiting"));
+        if (nw.state === "installed" && navigator.serviceWorker.controller) offerUpdate(nw);
       });
     });
+    // Home Screen apps on iOS usually resume rather than reload, so check again on return.
+    document.addEventListener("visibilitychange", () => { if (!document.hidden) reg.update().catch(() => {}); });
   }).catch(() => {});
   let reloaded = false;
   navigator.serviceWorker.addEventListener("controllerchange", () => { if (!reloaded) { reloaded = true; location.reload(); } });
