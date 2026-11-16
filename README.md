@@ -110,6 +110,34 @@ Instead of typing the link, import a JSON file through the Repository tab:
 { "format": "koma-repo-config", "name": "My library", "url": "https://example.host/koma/", "token": "optional" }
 ```
 
+## Online Library (1.2.1)
+
+Repository › **Online library** browses a Suwayomi server through the repository host, so Safari
+isn't needed. The host (`koma_repo_server.py` 1.2.1) exposes a small JSON API next to the catalogue;
+the app only talks to the repository link, never to Suwayomi directly.
+
+| Endpoint | Returns |
+|---|---|
+| `GET api/status` | `{server: "koma-repo", version, suwayomi: {ok, version} or {ok: false, message}}` |
+| `GET api/sources` | Installed sources (`id, name, lang, latest, nsfw, icon`), Japanese first |
+| `GET api/library?page=N` | Series in Suwayomi's library, 60 per page |
+| `GET api/browse?source=ID&type=POPULAR\|LATEST\|SEARCH&q=…&page=N` | `{items: [{id, title, thumb, inLibrary}], hasNext}` |
+| `GET api/manga/ID[?refresh=1]` | Series details and chapters (newest first), with `sent` / `job` per chapter |
+| `GET api/thumb/ID`, `GET api/icon/NAME` | Cover and source icon images |
+| `GET api/jobs` | Download jobs: `queued`, `downloading` (`done`/`total`), `sent`, `failed` (`error`) |
+| `POST api/download` `{chapterId, force}` | Queues a chapter: the host builds a `.cbz` (+ `ComicInfo.xml`) into `Koma/Inbox` and starts the pipeline |
+
+- Errors are JSON `{error, message}`: `suwayomi_unreachable` (503), `source_error` (502, the source's
+  own message), `bad_request` (400), `forbidden_origin` (403). A host without the API (404 on
+  `api/status`) shows "no Online Library yet".
+- The app shows the connection state: offline, laptop unreachable (Meshnet), Suwayomi not
+  responding, or a source error, each with Try again.
+- `POST` is only accepted from the app's origin; other websites opened on the phone can't start downloads.
+- A chapter already sent shows **In Koma**; tapping asks "Send again?" first. Same pages make the same
+  archive, so a re-send of a chapter still in the Library is caught as a duplicate by the pipeline.
+- Everything is network-only: the service worker never caches API calls, so the app shell and
+  on-phone volumes are unaffected when the laptop is away.
+
 ## Library server (pipeline side)
 
 `koma_pipeline.py --watch-server` (the scheduled task passes it) checks your own comic server's

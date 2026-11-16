@@ -67,6 +67,33 @@ button:disabled{opacity:.35;cursor:default}
 .rnote{font-size:12px;color:var(--mute);margin-top:2px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .field{display:block;width:100%;margin:6px 0 12px;padding:11px 12px;border-radius:10px;background:var(--panel);border:1px solid var(--line);color:var(--text);font:14px/1.3 ui-monospace,monospace}
 .err{font-size:13px;background:#2a1616;border:1px solid #5a2323;color:#f3b8ad;border-radius:12px;padding:10px 12px;margin-bottom:14px}
+/* online library (1.2.1) */
+.rseg{margin:0 0 14px}
+.ok{color:#8fd19e}
+.olbar{display:flex;flex-direction:column;gap:8px;margin-bottom:14px}
+.olbar .field{margin:0}
+select.field{font:15px/1.3 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;-webkit-appearance:none;appearance:none;color:var(--text);
+  background:var(--panel) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%239a988f' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E") no-repeat right 12px center/18px;padding-right:40px}
+select.field option{color:#111;background:#fff}
+.olsearch{display:flex;gap:8px}
+.olsearch .field{flex:1;min-width:0;font:16px/1.3 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}  /* 16px: iOS zooms smaller inputs */
+.olmore{display:flex;margin:18px auto 0}
+.olnote{font-size:12.5px;color:var(--mute);margin-top:16px}
+.mhead{display:flex;gap:14px;align-items:flex-start;margin-bottom:12px}
+.mcv{width:96px;aspect-ratio:1/1.42;object-fit:cover;border-radius:8px;background:var(--panel);border:1px solid var(--line);flex:none}
+.mt{font-size:18px;font-weight:700;line-height:1.25;margin-bottom:4px}
+.mhead .vr,.chrow .vr{font-size:12px;color:var(--mute);margin-top:2px}
+.mdesc{font-size:13.5px;color:#cfcdc6;white-space:pre-line;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden;margin-bottom:14px;cursor:pointer}
+.mdesc.open{display:block}
+.chrow{display:flex;align-items:center;gap:10px;padding:11px 0;border-bottom:1px solid var(--line)}
+.chn{flex:1;min-width:0}
+.chname{font-size:14.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cherr{font-size:12px;color:#ff8a7a;margin-top:2px}
+.chb{flex:none;font-size:12.5px;font-weight:700;padding:6px 12px;border-radius:999px;background:var(--accent);color:#fff;min-width:88px;text-align:center}
+.chb.busy{background:#2f2f36;color:var(--text);font-variant-numeric:tabular-nums}
+.chb.have{background:rgba(242,193,78,.14);color:var(--gold)}
+.chb.fail{background:#2a1616;color:#ff8a7a;border:1px solid #5a2323}
+.p-head h2{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
 /* ---------- reader ---------- */
 #reader{position:fixed;inset:0;z-index:20;background:var(--ink)}
@@ -281,6 +308,7 @@ async function renderLibrary() {
   if (libTab === "repo") return renderRepo();
   const vols = (await all("volumes")).sort((a, b) => (b.lastReadAt || b.addedAt) - (a.lastReadAt || a.addedAt));
   const body = $("#libBody");
+  if (libTab !== "device") return;          // switched tabs while loading: don't paint over the other tab
   if (!vols.length) {
     body.innerHTML = `<div class="empty">
       <p>No volumes yet. Your laptop prepares them: drop a <b>.cbz</b> into <b>iCloud Drive › 6. Automation › Koma › Inbox</b>, and it appears in <b>Koma › Library</b> with a matching <b>.koma.json</b> reading pack.</p>
@@ -297,7 +325,9 @@ async function renderLibrary() {
       <div class="m">${v.lastReadAt ? `p. ${(v.lastPage || 0) + 1} / ${v.pageCount}` : `${v.pageCount} pages`}</div>
       <div class="bar"><i style="width:${v.lastReadAt ? pct : 0}%"></i></div></button>`;
   }));
-  body.innerHTML = `<div class="grid">${cards.join("")}</div>${await footer()}`;
+  const foot = await footer();
+  if (libTab !== "device") return;
+  body.innerHTML = `<div class="grid">${cards.join("")}</div>${foot}`;
 }
 async function footer() {
   let s = "";
@@ -651,7 +681,7 @@ const repoCovers = new Map(), repoBusy = new Map();
 async function saveRepo(cfg) {
   let url = String(cfg.url).trim(); if (!url.endsWith("/")) url += "/";
   repo = { name: cfg.name || new URL(url).host, url, token: String(cfg.token || "").trim() };
-  await kvSet("repo", repo); repoIndex = null; repoCovers.clear();
+  await kvSet("repo", repo); repoIndex = null; repoCovers.clear(); olReset(true);
 }
 function repoFetch(path, init = {}) {
   return fetch(new URL(path.split("/").map(encodeURIComponent).join("/"), repo.url), {
@@ -730,10 +760,12 @@ async function renderRepo() {
       <p>The link should serve <code>index.json</code> in Koma's catalogue format.</p></div>`;
     return;
   }
-  if (!repoIndex && !repoErr) { body.innerHTML = `<div class="empty"><p>Loading ${esc(repo.name)}…</p></div>`; await loadRepoIndex(); }
+  if (repoView === "online") return renderOnline();
+  if (!repoIndex && !repoErr) { body.innerHTML = repoSeg() + `<div class="empty"><p>Loading ${esc(repo.name)}…</p></div>`; await loadRepoIndex(); }
+  if (libTab !== "repo" || repoView !== "catalogue") return;
   const local = new Map();
   for (const lv of await all("volumes")) { local.set(lv.id, lv.id); if (lv.repoId) local.set(lv.repoId, lv.id); }
-  const head = `<div class="rhead"><span><b>${esc(repo.name)}</b>${repoIndex ? ` · ${repoIndex.volumes.length} volume${repoIndex.volumes.length === 1 ? "" : "s"}` : ""}</span>
+  const head = repoSeg() + `<div class="rhead"><span><b>${esc(repo.name)}</b>${repoIndex ? ` · ${repoIndex.volumes.length} volume${repoIndex.volumes.length === 1 ? "" : "s"}` : ""}</span>
     <button class="dk" data-repo="refresh">Refresh</button><button class="dk" data-repo="remove">Remove</button></div>`;
   if (repoErr) { body.innerHTML = head + `<div class="err">${esc(repoErr)}</div>`; return; }
   const vols = repoIndex.volumes;
@@ -769,7 +801,7 @@ async function repoAction(a) {
     try { if (!/^https?:$/i.test(new URL(url).protocol)) throw 0; } catch { toast("That isn't a valid web link."); return; }
     await saveRepo({ url, token, name: name || undefined }); renderRepo();
   } else if (a === "refresh") { repoIndex = null; repoErr = ""; renderRepo(); }
-  else if (a === "remove") { repo = null; repoIndex = null; repoErr = ""; repoCovers.clear(); await tx(["kv"], "readwrite", t => { t.objectStore("kv").delete("repo"); }); renderRepo(); }
+  else if (a === "remove") { repo = null; repoIndex = null; repoErr = ""; repoCovers.clear(); olReset(true); await tx(["kv"], "readwrite", t => { t.objectStore("kv").delete("repo"); }); renderRepo(); }
 }
 async function downloadFromRepo(id) {
   const v = repoIndex && repoIndex.volumes.find(x => x.id === id);
@@ -802,6 +834,263 @@ async function downloadFromRepo(id) {
     toast(e && e.message === "http" ? netMsg(e, r) : /quota/i.test(String(e && e.name)) ? "Not enough storage on this device." : netMsg(e));
   } finally { repoBusy.delete(id); busy(""); renderRepo(); }
 }
+
+/* ================= online library (1.2.1): browse Suwayomi through the laptop's repository server ================= */
+// Everything here talks to <repository>/api/… (koma_repo_server.py), which talks to Suwayomi on the laptop.
+// Network-only: nothing is cached, so the app shell and on-phone volumes are unaffected when the laptop is away.
+let repoView = "catalogue";
+const ol = { status: null, err: "", sources: null, src: "library", mode: "POPULAR", q: "", items: [], page: 1,
+  hasNext: false, loading: false, loaded: false, listErr: "", listKey: "", manga: null, mangaErr: "", order: "new",
+  showAll: false, descOpen: false, jobs: [], pollT: null, confirm: null };
+const OL_CAP = 300;
+const MSTATUS = { ONGOING: "Ongoing", COMPLETED: "Completed", LICENSED: "Licensed", PUBLISHING_FINISHED: "Finished",
+  CANCELLED: "Cancelled", ON_HIATUS: "On hiatus" };
+const olUrl = p => new URL(p, repo.url).href;
+const apiImg = p => typeof p === "string" && /^api\/[\w\/.\-%]+$/.test(p) ? olUrl(p) : "";
+function repoSeg() {
+  return `<div class="seg rseg"><button data-rv="catalogue" class="${repoView === "catalogue" ? "on" : ""}">Catalogue</button>` +
+    `<button data-rv="online" class="${repoView === "online" ? "on" : ""}">Online library</button></div>`;
+}
+function olReset(full) {
+  if (full) { ol.status = null; ol.err = ""; ol.sources = null; }
+  ol.items = []; ol.page = 1; ol.hasNext = false; ol.loading = false; ol.loaded = false; ol.listErr = ""; ol.listKey = "";
+}
+async function olApi(path, { method = "GET", body, timeout = 20000 } = {}) {
+  if (!navigator.onLine) throw { kind: "offline" };
+  const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), timeout);
+  let r;
+  try {
+    r = await fetch(olUrl(path), { method, cache: "no-store", signal: ctl.signal, body: body ? JSON.stringify(body) : undefined,
+      headers: { ...(repo.token ? { Authorization: "Bearer " + repo.token } : {}), ...(body ? { "Content-Type": "application/json" } : {}) } });
+  } catch { throw { kind: ctl.signal.aborted ? "timeout" : navigator.onLine ? "laptop" : "offline" }; }
+  finally { clearTimeout(t); }
+  let j = null; try { j = await r.json(); } catch {}
+  if (r.status === 404 && path === "api/status") throw { kind: j && j.error === "disabled" ? "disabled" : "old" };
+  if (!r.ok || !j) throw { kind: (j && j.error) || "http", status: r.status, message: j && j.message };
+  return j;
+}
+function olMsg(e) {
+  const host = repo ? new URL(repo.url).host : "your laptop";
+  switch (e && e.kind) {
+    case "offline": return "You're offline. The Online Library needs a connection to your laptop. Volumes on this phone still read normally.";
+    case "laptop": return `Can't reach your laptop (${host}). Check NordVPN Meshnet is on, on this phone and on the laptop, and that the laptop is awake.`;
+    case "timeout": return "Your laptop took too long to answer. The source may be slow; try again.";
+    case "old": return "Your laptop's repository server has no Online Library yet. Update koma_repo_server.py and restart the \"Koma Repo Server\" task.";
+    case "disabled": return "The Online Library is turned off on your laptop's repository server.";
+    case "http": return `Your laptop answered HTTP ${e.status}.`;
+    default: return (e && e.message) || "Something went wrong talking to your laptop.";
+  }
+}
+async function olConnect() {
+  ol.err = ""; ol.status = null;
+  try {
+    const s = await olApi("api/status", { timeout: 10000 });
+    if (s.server !== "koma-repo") throw { kind: "old" };
+    if (!s.suwayomi || !s.suwayomi.ok) throw { kind: "suwayomi_unreachable", message: s.suwayomi && s.suwayomi.message };
+    ol.sources = (await olApi("api/sources")).sources;
+    if (ol.src !== "library" && !ol.sources.some(x => x.id === ol.src)) ol.src = "library";
+    try { ol.jobs = (await olApi("api/jobs", { timeout: 10000 })).jobs; } catch {}
+    ol.status = s;
+  } catch (e) { ol.err = olMsg(e); }
+}
+async function olLoad(more) {
+  const key = `${ol.src}|${ol.mode}|${ol.q}`;
+  if (!more) { ol.items = []; ol.page = 1; ol.hasNext = false; }
+  ol.listErr = ""; ol.listKey = key;
+  if (ol.src !== "library" && ol.mode === "SEARCH" && !ol.q) { ol.loaded = true; return; }
+  ol.loading = true;
+  const page = more ? ol.page + 1 : 1;
+  const path = ol.src === "library" ? `api/library?page=${page}`
+    : `api/browse?source=${encodeURIComponent(ol.src)}&type=${ol.mode}&page=${page}${ol.mode === "SEARCH" ? "&q=" + encodeURIComponent(ol.q) : ""}`;
+  try {
+    const r = await olApi(path, { timeout: 130000 });
+    if (ol.listKey !== key) return;
+    const seen = new Set(ol.items.map(x => x.id));
+    ol.items.push(...r.items.filter(x => !seen.has(x.id))); ol.page = r.page; ol.hasNext = r.hasNext;
+  } catch (e) { if (ol.listKey === key) ol.listErr = olMsg(e); }
+  finally { if (ol.listKey === key) { ol.loading = false; ol.loaded = true; } }
+}
+const olActive = () => ol.jobs.filter(j => j.state === "queued" || j.state === "downloading").length;
+function olHeadHTML() {
+  const n = olActive();
+  return `<span><b>Suwayomi</b> ${esc(ol.status.suwayomi.version || "")} · <span class="ok">laptop connected</span>${n ? ` · ${n} downloading` : ""}</span>`;
+}
+async function renderOnline() {
+  const body = $("#libBody"), seg = repoSeg();
+  const here = () => libTab === "repo" && repoView === "online" && !$("#lib").hidden;
+  if (!navigator.onLine) { body.innerHTML = seg + `<div class="err">${esc(olMsg({ kind: "offline" }))}</div>`; return; }
+  if (!ol.status && !ol.err) {
+    body.innerHTML = seg + `<div class="empty"><p>Connecting to your laptop…</p></div>`;
+    await olConnect();
+    if (!here()) return;
+  }
+  if (ol.err) { body.innerHTML = seg + `<div class="err">${esc(ol.err)}</div><button class="dk" data-ol="reconnect">Try again</button>`; return; }
+  if (!ol.loaded && !ol.loading) olLoad(false).then(() => { if (here()) renderOnline(); });
+  const typed = $("#olQ") ? $("#olQ").value : null;           // keep half-typed searches across repaints
+  const src = ol.sources.find(s => s.id === ol.src);
+  const opts = `<option value="library"${ol.src === "library" ? " selected" : ""}>My Suwayomi library</option>` +
+    ol.sources.map(s => `<option value="${esc(s.id)}"${s.id === ol.src ? " selected" : ""}>${esc(s.name)}` +
+      `${s.lang && s.lang !== "localsourcelang" ? " · " + esc(s.lang.toUpperCase()) : ""}${s.nsfw ? " · 18+" : ""}</option>`).join("");
+  const modes = src ? `<div class="seg">${[["POPULAR", "Popular"], ...(src.latest ? [["LATEST", "Latest"]] : []), ["SEARCH", "Search"]]
+    .map(([m, l]) => `<button data-olmode="${m}" class="${ol.mode === m ? "on" : ""}">${l}</button>`).join("")}</div>` : "";
+  const search = src && ol.mode === "SEARCH" ? `<form id="olForm" class="olsearch"><input class="field" id="olQ" type="search" enterkeyhint="search"
+      placeholder="Search ${esc(src.name)}" value="${esc(typed ?? ol.q)}" autocapitalize="off" autocorrect="off" spellcheck="false"><button class="dk pri">Search</button></form>` : "";
+  let list;
+  if (ol.listErr) list = `<div class="err">${esc(ol.listErr)}</div><button class="dk" data-ol="reload">Try again</button>`;
+  else if (!ol.items.length) list = `<div class="empty"><p>${ol.loading ? "Loading…"
+    : ol.src === "library" ? "Your Suwayomi library is empty. Pick a source above to browse it, or add series to the library in Suwayomi."
+    : ol.mode === "SEARCH" && !ol.q ? `Type a title to search ${esc(src ? src.name : "")}.` : "Nothing found."}</p></div>`;
+  else list = `<div class="grid">${ol.items.map(m => {
+      const u = apiImg(m.thumb);
+      return `<button class="vol" data-olmanga="${+m.id}"><div class="cv">${u ? `<img class="olimg" src="${esc(u)}" alt="" loading="lazy">` : ""}</div>` +
+        `${m.inLibrary && ol.src !== "library" ? `<span class="badge">In library</span>` : ""}<div class="t">${esc(m.title)}</div></button>`;
+    }).join("")}</div>${ol.hasNext ? `<button class="dk olmore" data-ol="more"${ol.loading ? " disabled" : ""}>${ol.loading ? "Loading…" : "Load more"}</button>` : ""}`;
+  body.innerHTML = seg + `<div class="rhead" id="olHead">${olHeadHTML()}<button class="dk" data-ol="reconnect">Refresh</button></div>
+    <div class="olbar"><select class="field" id="olSrc" aria-label="Source">${opts}</select>${modes}${search}</div>${list}
+    <p class="olnote">Tap a series for its chapters. Download sends a chapter to your laptop: it appears under Catalogue as Processing on PC, and readings attach when the PC finishes.</p>`;
+}
+document.addEventListener("error", e => { if (e.target && e.target.classList && e.target.classList.contains("olimg")) e.target.remove(); }, true);
+$("#libBody").addEventListener("click", e => {
+  const rv = e.target.closest("[data-rv]");
+  if (rv) { repoView = rv.dataset.rv; kvSet("repoView", repoView); renderRepo(); return; }
+  const o = e.target.closest("[data-ol]");
+  if (o) {
+    const a = o.dataset.ol;
+    if (a === "reconnect") { olReset(true); renderOnline(); }
+    else if (a === "reload") { ol.loaded = false; renderOnline(); }
+    else if (a === "more" && !ol.loading) { olLoad(true).then(() => renderOnline()); renderOnline(); }
+    return;
+  }
+  const md = e.target.closest("[data-olmode]");
+  if (md) {
+    if (ol.mode === md.dataset.olmode) return;
+    ol.mode = md.dataset.olmode; ol.q = ""; olReset(false); renderOnline();
+    if (ol.mode === "SEARCH") setTimeout(() => $("#olQ") && $("#olQ").focus(), 60);
+    return;
+  }
+  const mg = e.target.closest("[data-olmanga]");
+  if (mg) openManga(+mg.dataset.olmanga);
+});
+$("#libBody").addEventListener("change", e => {
+  if (e.target.id !== "olSrc") return;
+  ol.src = e.target.value; ol.mode = "POPULAR"; ol.q = ""; kvSet("olSrc", ol.src); olReset(false); renderOnline();
+});
+$("#libBody").addEventListener("submit", e => {
+  if (e.target.id !== "olForm") return;
+  e.preventDefault();
+  ol.q = $("#olQ").value.trim(); $("#olQ").blur(); olReset(false); renderOnline();
+});
+window.addEventListener("online", () => { if (libTab === "repo" && repoView === "online") { olReset(true); renderOnline(); } });
+window.addEventListener("offline", () => { if (libTab === "repo" && repoView === "online") renderOnline(); });
+
+/* series panel: details + chapters + Download */
+async function openManga(id, refresh) {
+  panel.hidden = false;
+  ol.manga = { id }; ol.mangaErr = ""; ol.confirm = null;
+  if (!refresh) { ol.showAll = false; ol.descOpen = false; }
+  paintManga();
+  try {
+    const r = await olApi(`api/manga/${id}${refresh ? "?refresh=1" : ""}`, { timeout: 190000 });
+    if (!ol.manga || ol.manga.id !== id) return;
+    ol.manga = { id, data: r };
+    try { ol.jobs = (await olApi("api/jobs", { timeout: 10000 })).jobs; } catch {}
+  } catch (e) { if (ol.manga && ol.manga.id === id) ol.mangaErr = olMsg(e); }
+  paintManga(); olPoll();
+}
+function chState(c) {
+  const j = [...ol.jobs].reverse().find(x => x.chapterId === c.id) || c.job;
+  if (j && (j.state === "queued" || j.state === "downloading")) return j;
+  if (j && j.state === "failed" && !(c.sent && c.sent.at > j.at)) return j;
+  if (c.sent || (j && j.state === "sent")) return { state: "sent" };
+  return { state: "none" };
+}
+function chapterRow(c) {
+  const s = chState(c);
+  const date = c.uploaded ? new Date(c.uploaded).toLocaleDateString("en-AU", { day: "numeric", month: "short", year: "numeric" }) : "";
+  const sub = [c.scanlator, date, c.pages ? c.pages + " pages" : ""].filter(Boolean).map(esc).join(" · ");
+  const btn = s.state === "queued" ? `<span class="chb busy">Queued</span>`
+    : s.state === "downloading" ? `<span class="chb busy">${s.total ? `${s.done}/${s.total}` : "Starting…"}</span>`
+    : s.state === "sent" ? `<button class="chb have" data-olch="${+c.id}" data-sent="1">${ol.confirm === c.id ? "Send again?" : "In Koma"}</button>`
+    : s.state === "failed" ? `<button class="chb fail" data-olch="${+c.id}">Retry</button>`
+    : `<button class="chb" data-olch="${+c.id}">Download</button>`;
+  return `<div class="chrow"><div class="chn"><div class="chname">${esc(c.name || "Chapter " + (c.number ?? ""))}</div>` +
+    `${sub ? `<div class="vr">${sub}</div>` : ""}${s.state === "failed" && s.error ? `<div class="cherr">${esc(s.error)}</div>` : ""}</div>${btn}</div>`;
+}
+function shownChapters() {
+  const ch = ol.manga.data.chapters.slice();
+  if (ol.order === "old") ch.reverse();
+  return ol.showAll ? ch : ch.slice(0, OL_CAP);
+}
+function paintManga() {
+  if (!ol.manga || panel.hidden) return;
+  const d = ol.manga.data, m = d && d.manga;
+  const head = `<div class="p-head"><button class="ib" data-p="close" aria-label="Back"><svg viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg></button>
+    <h2>${esc(m ? m.title : "Series")}</h2>${m ? `<button class="ib" data-olm="refresh" aria-label="Check the source for new chapters"><svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"/></svg></button>` : ""}</div>`;
+  if (!m) {
+    panel.innerHTML = head + `<div class="p-body">${ol.mangaErr ? `<div class="err">${esc(ol.mangaErr)}</div><button class="dk" data-olm="retry">Try again</button>`
+      : `<p style="color:var(--mute)">Fetching chapters from the source…</p>`}</div>`;
+    return;
+  }
+  const meta = [m.author, m.artist && m.artist !== m.author ? m.artist : "", MSTATUS[m.status] || "", m.source].filter(Boolean).map(esc).join(" · ");
+  const shown = shownChapters(), total = d.chapters.length, u = apiImg(m.thumb);
+  panel.innerHTML = head + `<div class="p-body">
+    <div class="mhead">${u ? `<img class="mcv olimg" src="${esc(u)}" alt="">` : `<div class="mcv"></div>`}
+      <div><div class="mt">${esc(m.title)}</div>${meta ? `<div class="vr">${meta}</div>` : ""}${m.genres.length ? `<div class="vr">${esc(m.genres.slice(0, 8).join(", "))}</div>` : ""}</div></div>
+    ${m.description ? `<div class="mdesc${ol.descOpen ? " open" : ""}" data-olm="desc">${esc(m.description)}</div>` : ""}
+    ${d.warning ? `<div class="err">${esc(d.warning)}</div>` : ""}
+    <div class="rhead"><span><b>${total} chapter${total === 1 ? "" : "s"}</b></span>${total > 1 ? `<button class="dk" data-olm="order">${ol.order === "new" ? "Newest first" : "Oldest first"}</button>` : ""}</div>
+    <div id="olChapters">${total ? shown.map(chapterRow).join("") : `<p style="color:var(--mute)">The source lists no chapters for this series.</p>`}</div>
+    ${total > shown.length ? `<button class="dk olmore" data-olm="all">Show all ${total}</button>` : ""}
+    <p class="olnote">Download sends the chapter to your laptop. It lands in Koma's Inbox, shows under Catalogue as Processing on PC, and readings attach when the PC finishes. Use Read raw there to start before then.</p></div>`;
+}
+function refreshChapters() {
+  const box = $("#olChapters");
+  if (box && ol.manga && ol.manga.data && !panel.hidden) box.innerHTML = shownChapters().map(chapterRow).join("");
+  const h = $("#olHead");
+  if (h && ol.status && libTab === "repo" && repoView === "online") h.firstElementChild.outerHTML = olHeadHTML();
+}
+async function olDownload(cid, force) {
+  try {
+    const { job } = await olApi("api/download", { method: "POST", body: { chapterId: cid, force: !!force }, timeout: 15000 });
+    if (job.state === "sent" && !job.id) toast("Already in Koma.");
+    else { ol.jobs = ol.jobs.filter(x => x.id !== job.id).concat(job); toast("Queued on your laptop."); }
+  } catch (e) { toast(olMsg(e)); }
+  refreshChapters(); olPoll();
+}
+function olPoll() {
+  clearTimeout(ol.pollT);
+  if (!olActive()) return;
+  ol.pollT = setTimeout(async () => {
+    if (document.hidden) return olPoll();
+    try {
+      const prev = new Map(ol.jobs.map(j => [j.id, j.state]));
+      ol.jobs = (await olApi("api/jobs", { timeout: 10000 })).jobs;
+      for (const j of ol.jobs) {
+        if (!prev.has(j.id) || prev.get(j.id) === j.state) continue;
+        if (j.state === "sent") { toast(`${j.title} sent to Koma.`); repoIndex = null; }
+        else if (j.state === "failed") toast(`${j.title || "Chapter"} failed: ${j.error}`);
+      }
+    } catch {}
+    refreshChapters(); olPoll();
+  }, 2000);
+}
+document.addEventListener("visibilitychange", () => { if (!document.hidden && repo && ol.status) olPoll(); });
+panel.addEventListener("click", e => {
+  if (e.target.closest('[data-p="close"]')) { ol.manga = null; return; }
+  const c = e.target.closest("[data-olch]");
+  if (c) {
+    const id = +c.dataset.olch;
+    if (c.dataset.sent && ol.confirm !== id) { ol.confirm = id; refreshChapters(); return; }
+    const force = !!c.dataset.sent || c.classList.contains("fail");
+    ol.confirm = null; olDownload(id, force); return;
+  }
+  const b = e.target.closest("[data-olm]"); if (!b || !ol.manga) return;
+  const a = b.dataset.olm;
+  if (a === "refresh" || a === "retry") openManga(ol.manga.id, a === "refresh");
+  else if (a === "order") { ol.order = ol.order === "new" ? "old" : "new"; paintManga(); }
+  else if (a === "all") { ol.showAll = true; paintManga(); }
+  else if (a === "desc") { ol.descOpen = !ol.descOpen; b.classList.toggle("open", ol.descOpen); }
+});
 
 /* ================= vocab ================= */
 function toggleSave(t, b) {
@@ -874,10 +1163,12 @@ document.addEventListener("click", e => {
 });
 
 /* ================= boot ================= */
-const APP_VERSION = "1.2.0";
+const APP_VERSION = "1.2.1";
 (async () => {
   settings = { ...DEF, ...(await kvGet("settings", {})) };
   st.vocab = await kvGet("vocab", []);
+  repoView = await kvGet("repoView", "catalogue");
+  ol.src = await kvGet("olSrc", "library");
   try { if (navigator.storage && navigator.storage.persist) await navigator.storage.persist(); } catch {}
   renderLibrary();
   repo = await kvGet("repo", null);
