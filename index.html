@@ -118,6 +118,7 @@ select.field option{color:#111;background:#fff}
 .tp.flap .pb{position:absolute;inset:0;background:#f3efe6}
 .tp.flap .pb img{opacity:.14}
 .tp .fs,.tp .es{position:absolute;top:0;bottom:0;pointer-events:none}
+.glc{position:absolute;inset:0;width:100%;height:100%;display:block}
 .bx{position:absolute;border:1.5px solid rgba(224,83,58,.8);background:rgba(224,83,58,.07);border-radius:7px;min-width:24px;min-height:24px}
 .bx i{position:absolute;top:-8px;right:-8px;background:var(--accent);color:#fff;font:700 10px/17px system-ui;font-style:normal;min-width:17px;height:17px;border-radius:9px;text-align:center;padding:0 4px;pointer-events:none}
 .bx.on{border-color:var(--gold);background:rgba(242,193,78,.16);box-shadow:0 0 0 3px rgba(242,193,78,.35)}
@@ -490,7 +491,7 @@ async function openVolume(id) {
   if (!st.pack) toast("No reading pack for this volume. Import its .koma.json to get help.");
 }
 function closeReader() {
-  turnReset(); nbClear();
+  turnReset(); nbClear(); glCurl.flush();
   closeSheet(); reader.hidden = true; $("#lib").hidden = false;
   if (st.url) { URL.revokeObjectURL(st.url); st.url = null; }
   renderLibrary();
@@ -533,7 +534,7 @@ function nbLoad(i) {
     im.src = u;
     try { await im.decode(); } catch {}
     if (nb.get(i) !== e) { URL.revokeObjectURL(u); return e; }
-    e.url = u; e.w = im.naturalWidth; e.h = im.naturalHeight;
+    e.url = u; e.w = im.naturalWidth; e.h = im.naturalHeight; e.img = im;
     return e;
   })();
   nb.set(i, e);
@@ -542,7 +543,13 @@ function nbLoad(i) {
 function nbAround() {
   if (tn) return;
   for (const [i, e] of nb) if (Math.abs(i - st.idx) > 2) { if (e.url) URL.revokeObjectURL(e.url); nb.delete(i); }
-  nbLoad(st.idx + 1); nbLoad(st.idx - 1);
+  const a = nbLoad(st.idx + 1), b = nbLoad(st.idx - 1), vol = st.vol && st.vol.id, idx = st.idx;
+  if (turnMode() !== "curl") return;
+  // upload the current page and its neighbours to the GPU while the reader is idle
+  Promise.all([a && a.p, b && b.p]).then(() => {
+    const go = () => { if (!tn && st.vol && st.vol.id === vol && st.idx === idx) glCurl.warm([img, a && a.img, b && b.img]); };
+    window.requestIdleCallback ? requestIdleCallback(go, { timeout: 600 }) : setTimeout(go, 120);
+  });
 }
 let tn = null;                                          // the turn in progress
 const turnMode = () => ["curl", "slide", "none"].includes(settings.turn) ? settings.turn : "curl";
@@ -562,11 +569,224 @@ function makePane(pg, back, extra) {
   el._r = r;
   return el;
 }
-function turnBegin(forward) {
+/* ---- WebGL page curl (1.2.5): Apple Books-style. The turning page is a fine mesh wrapped around a
+   cylinder; the page corner follows the finger in 2D, so the fold tilts when the finger moves up or down.
+   The underside shows the back of the paper with the ink faintly mirrored through, the roll is lit, and
+   the curl throws a soft shadow on the page below. Falls back to the CSS fold without WebGL. ---- */
+const glCurl = (() => {
+  let cv = null, gl = null, prog = null, failed = false, U = {}, aPos = -1;
+  let meshBuf = null, idxBuf = null, nIdx = 0, meshKey = "", quadBuf = null, texMov = null, texUnd = null, rMov = null, rUnd = null;
+  const VS = `
+attribute vec2 aPos;
+uniform vec2 uView; uniform vec4 uRect; uniform vec4 uMov; uniform float uMirror;
+uniform vec2 uP; uniform vec2 uN; uniform float uR; uniform float uCurl; uniform float uZ;
+varying vec2 vUV; varying float vA; varying float vD;
+const float PI = 3.14159265;
+void main() {
+  vUV = aPos / uRect.zw;
+  vec2 scr = uRect.xy + aPos;
+  vec2 q = scr - uMov.xy;
+  if (uMirror > 0.5) q.x = uMov.z - q.x;             // logical page space: spine at x = 0
+  float d = dot(q - uP, uN);
+  vD = d; vA = 0.0;
+  float z = 0.0;
+  if (uCurl > 0.5 && d > 0.0) {
+    vec2 base = q - uN * d;
+    float arc = PI * uR;
+    if (d < arc) { float a = d / uR; q = base + uN * (uR * sin(a)); z = uR * (1.0 - cos(a)); vA = a; }
+    else { q = base - uN * (d - arc); z = 2.0 * uR; vA = PI; }
+    if (uMirror > 0.5) q.x = uMov.z - q.x;
+    scr = uMov.xy + q;
+  }
+  gl_Position = vec4(scr.x / uView.x * 2.0 - 1.0, 1.0 - scr.y / uView.y * 2.0, uZ - z * 0.0004, 1.0);
+}`;
+  const FS = `
+precision highp float;
+uniform sampler2D uTex; uniform float uUnder; uniform float uDim; uniform float uShadow; uniform float uR;
+varying vec2 vUV; varying float vA; varying float vD;
+void main() {
+  vec3 c = texture2D(uTex, vUV).rgb;
+  if (uUnder > 0.5) {
+    float sh = 1.0 - smoothstep(uR * 0.5, uR * 0.5 + 70.0, vD);
+    c *= (1.0 - 0.42 * sh * uShadow) * (1.0 - uDim);
+    gl_FragColor = vec4(c, 1.0);
+    return;
+  }
+  float ca = cos(vA);
+  if (ca >= 0.0) {
+    float l = 1.0 - 0.40 * (1.0 - ca);
+    float sx = clamp(sin(vA * 1.6), 0.0, 1.0); float s2 = sx * sx, s4 = s2 * s2; float hl = 0.14 * s4 * s4 * s2;
+    gl_FragColor = vec4(c * l + hl, 1.0);
+  } else {
+    vec3 b = mix(vec3(0.957, 0.945, 0.918), c, 0.12);
+    gl_FragColor = vec4(b * (0.70 + 0.30 * (-ca)), 1.0);
+  }
+}`;
+  function init() {
+    if (gl) return true;
+    if (failed) return false;
+    try {
+      cv = document.createElement("canvas"); cv.className = "glc";
+      gl = cv.getContext("webgl", { antialias: true, alpha: false, premultipliedAlpha: false });
+      if (!gl) throw new Error("no webgl");
+      const sh = (type, src) => {
+        const o = gl.createShader(type); gl.shaderSource(o, src); gl.compileShader(o);
+        if (!gl.getShaderParameter(o, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(o));
+        return o;
+      };
+      prog = gl.createProgram();
+      gl.attachShader(prog, sh(gl.VERTEX_SHADER, VS)); gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, FS));
+      gl.linkProgram(prog);
+      if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
+      gl.useProgram(prog);
+      aPos = gl.getAttribLocation(prog, "aPos");
+      for (const n of ["uView", "uRect", "uMov", "uMirror", "uP", "uN", "uR", "uCurl", "uZ", "uTex", "uUnder", "uDim", "uShadow"])
+        U[n] = gl.getUniformLocation(prog, n);
+      meshBuf = gl.createBuffer(); idxBuf = gl.createBuffer(); quadBuf = gl.createBuffer();
+      cv.addEventListener("webglcontextlost", e => {
+        e.preventDefault(); gl = null; failed = true;
+        if (tn && tn.gl) { tn.gl = false; turnBuild(); renderTurn(); }
+      });
+      return true;
+    } catch (e) {
+      console.warn("WebGL curl unavailable, using the CSS fold:", e && e.message);
+      gl = null; failed = true; return false;
+    }
+  }
+  // Textures are cached by image URL and uploaded ahead of time (warm), so a turn starts without a hitch.
+  const texCache = new Map();
+  function tex(im) {
+    const key = im && im.naturalWidth ? im.src : "blank";
+    let t = texCache.get(key);
+    if (t) { texCache.delete(key); texCache.set(key, t); return t; }      // refresh LRU position
+    t = makeTex(im); texCache.set(key, t);
+    while (texCache.size > 5) {
+      const [k, old] = texCache.entries().next().value;
+      if (old === texMov || old === texUnd) break;
+      gl.deleteTexture(old); texCache.delete(k);
+    }
+    return t;
+  }
+  function warm(images) { if (init()) for (const im of images) if (im && im.naturalWidth) tex(im); }
+  function flush() {
+    if (gl) for (const t of texCache.values()) gl.deleteTexture(t);
+    texCache.clear(); texMov = texUnd = null;
+  }
+  function makeTex(im) {
+    const t = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, t);
+    if (im && im.naturalWidth) {
+      const max = Math.min(gl.getParameter(gl.MAX_TEXTURE_SIZE), 4096);
+      const s = Math.min(1, max / Math.max(im.naturalWidth, im.naturalHeight));
+      let src = im;
+      if (s < 1) {                                         // very large page: scale to what the GPU accepts
+        const c = document.createElement("canvas");
+        c.width = Math.round(im.naturalWidth * s); c.height = Math.round(im.naturalHeight * s);
+        c.getContext("2d").drawImage(im, 0, 0, c.width, c.height); src = c;
+      }
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, src);
+    } else {
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([255, 255, 255, 255]));
+    }
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    return t;
+  }
+  function mesh(w, h) {                                     // grid over the turning page, in page pixels
+    const key = `${Math.round(w)}x${Math.round(h)}`;
+    if (key === meshKey) return;
+    meshKey = key;
+    // fine grid (~4 px cells on a phone) so the roll's silhouette stays smooth; < 65k vertices for Uint16 indices
+    const cols = 96, rows = Math.max(48, Math.min(160, Math.round(cols * h / w)));
+    const v = new Float32Array((cols + 1) * (rows + 1) * 2);
+    let k = 0;
+    for (let j = 0; j <= rows; j++) for (let i = 0; i <= cols; i++) { v[k++] = w * i / cols; v[k++] = h * j / rows; }
+    const idx = new Uint16Array(cols * rows * 6);
+    k = 0;
+    for (let j = 0; j < rows; j++) for (let i = 0; i < cols; i++) {
+      const a = j * (cols + 1) + i, b = a + 1, c = a + cols + 1, d = c + 1;
+      idx[k++] = a; idx[k++] = c; idx[k++] = b; idx[k++] = b; idx[k++] = c; idx[k++] = d;
+    }
+    gl.bindBuffer(gl.ARRAY_BUFFER, meshBuf); gl.bufferData(gl.ARRAY_BUFFER, v, gl.STATIC_DRAW);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, idxBuf); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, idx, gl.STATIC_DRAW);
+    nIdx = idx.length;
+  }
+  function scene(movIm, movRect, undIm, undRect) {
+    texMov = tex(movIm); texUnd = tex(undIm); rMov = movRect; rUnd = undRect;
+    mesh(movRect.w, movRect.h);
+    gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0, 0, undRect.w, 0, 0, undRect.h, undRect.w, undRect.h]), gl.STATIC_DRAW);
+  }
+  function draw(g) {                                        // g: { mirror, P, N, R, dim, shadow }
+    const dpr = Math.min(2, window.devicePixelRatio || 1), vw = viewer.clientWidth, vh = viewer.clientHeight;
+    const W = Math.round(vw * dpr), H = Math.round(vh * dpr);
+    if (cv.width !== W || cv.height !== H) { cv.width = W; cv.height = H; }
+    gl.viewport(0, 0, W, H);
+    gl.clearColor(14 / 255, 14 / 255, 16 / 255, 1); gl.clearDepth(1);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    gl.enable(gl.DEPTH_TEST); gl.depthFunc(gl.LEQUAL); gl.disable(gl.CULL_FACE);
+    gl.useProgram(prog);
+    gl.uniform2f(U.uView, vw, vh);
+    gl.uniform4f(U.uMov, rMov.L, rMov.T, rMov.w, rMov.h);
+    gl.uniform1f(U.uMirror, g.mirror ? 1 : 0);
+    gl.uniform2f(U.uP, g.P[0], g.P[1]); gl.uniform2f(U.uN, g.N[0], g.N[1]); gl.uniform1f(U.uR, g.R);
+    gl.uniform1i(U.uTex, 0); gl.activeTexture(gl.TEXTURE0);
+    gl.enableVertexAttribArray(aPos);
+    // page underneath: flat, dimmed, with the curl's shadow
+    gl.uniform4f(U.uRect, rUnd.L, rUnd.T, rUnd.w, rUnd.h);
+    gl.uniform1f(U.uCurl, 0); gl.uniform1f(U.uZ, 0.9); gl.uniform1f(U.uUnder, 1);
+    gl.uniform1f(U.uDim, g.dim); gl.uniform1f(U.uShadow, g.shadow);
+    gl.bindTexture(gl.TEXTURE_2D, texUnd);
+    gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf); gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    // the turning page, wrapped around the cylinder
+    gl.uniform4f(U.uRect, rMov.L, rMov.T, rMov.w, rMov.h);
+    gl.uniform1f(U.uCurl, 1); gl.uniform1f(U.uZ, 0.5); gl.uniform1f(U.uUnder, 0);
+    gl.bindTexture(gl.TEXTURE_2D, texMov);
+    gl.bindBuffer(gl.ARRAY_BUFFER, meshBuf); gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, idxBuf);
+    gl.drawElements(gl.TRIANGLES, nIdx, gl.UNSIGNED_SHORT, 0);
+  }
+  function clear() { texMov = texUnd = null; }             // textures stay cached for the next turn
+  return { init, scene, draw, clear, warm, flush, canvas: () => cv, rect: () => rMov };
+})();
+function glRender() {
+  // Corner-follows-finger geometry: the corner starts on the free edge at the touch height and travels
+  // past the spine as the turn completes (s 0 -> 1). The fold axis is the perpendicular bisector of the
+  // corner's start and current positions, kept off the spine so the page never tears from the binding.
+  const t = tn, m = glCurl.rect(), w = m.w, h = m.h;
+  const sRaw = t.released ? t.p : 0.5 * t.p;
+  const s = Math.max(0, Math.min(1, t.forward ? sRaw : 1 - sRaw));
+  const R0 = Math.max(16, Math.min(60, w * 0.11)), R = R0 * (1 - 0.6 * s);
+  const cy0 = Math.max(0, Math.min(h, t.fy0 - m.T));
+  let tilt = 1;
+  if (t.released && t.relP != null) {
+    const span = Math.abs((t.goal ?? 1) - t.relP);
+    tilt = span > 1e-3 ? 1 - Math.min(1, Math.abs(t.p - t.relP) / span) : 0;
+  }
+  const fy = cy0 + ((t.fy ?? t.fy0) - t.fy0) * tilt;
+  const Fx = w - s * (2 * w + 2 * Math.PI * R0), Fy = Math.max(-h * 0.25, Math.min(h * 1.25, fy));
+  let N = [1, 0], P = [w + 4 * R0, cy0];                        // s = 0: nothing curls
+  const dx = w - Fx, dy = cy0 - Fy;
+  if (dx > 0.5) {
+    const ang = Math.max(-0.5, Math.min(0.5, Math.atan2(dy, dx)));
+    N = [Math.cos(ang), Math.sin(ang)];
+    P = [(w + Fx) / 2, (cy0 + Fy) / 2];
+    const dmax = Math.max(-P[0] * N[0] - P[1] * N[1], -P[0] * N[0] + (h - P[1]) * N[1]);
+    if (dmax > 0) { P[0] += N[0] * dmax; P[1] += N[1] * dmax; }
+  }
+  const shadow = Math.min(1, s / 0.04) * (1 - Math.max(0, (s - 0.9) / 0.1));
+  glCurl.draw({ mirror: !t.ltr, P, N, R, dim: 0.22 * (1 - s), shadow });
+}
+function turnBegin(forward, fy) {
   const target = st.idx + (forward ? 1 : -1), ltr = settings.dir === "ltr";
+  const vh = viewer.clientHeight, tap = fy == null;
   tn = { forward, target, ltr, mode: turnMode(), p: 0, raf: 0,
          motion: forward !== ltr ? 1 : -1,            // +1: the page moves right on screen
-         edge: target < 0 || target >= st.n };
+         edge: target < 0 || target >= st.n,
+         fy0: tap ? vh * 0.84 : fy, fy: tap ? vh * 0.76 : fy };   // taps curl from the lower corner
   if (st.sheet) closeSheet();
   turnBuild();
   if (!tn.edge) {
@@ -579,6 +799,19 @@ function turnBuild() {
   const e = tn.edge ? null : nb.get(tn.target);
   const oth = e && e.url ? e : { url: "", w: cur.w, h: cur.h };
   turnEl.innerHTML = ""; turnEl.classList.remove("ready");
+  if (tn.mode === "curl" && !tn.edge && glCurl.init()) {
+    const curIm = img, othIm = e && e.url && e.img ? e.img : null;
+    const movIm = tn.forward ? curIm : othIm, undIm = tn.forward ? othIm : curIm;
+    const mov = tn.forward ? cur : oth, und = tn.forward ? oth : cur;
+    tn.gl = true;
+    glCurl.scene(movIm, fitRect(mov.w, mov.h), undIm, fitRect(und.w, und.h));
+    turnEl.appendChild(glCurl.canvas());
+    turnEl.hidden = false;
+    glRender();                                          // first frame matches the page on screen
+    turnEl.classList.add("ready"); viewer.classList.add("turning");
+    return;
+  }
+  tn.gl = false;
   if (tn.edge || tn.mode === "slide") {
     tn.a = makePane(cur, false, "slide");
     tn.b = tn.edge ? null : makePane(oth, false, "slide");
@@ -610,6 +843,7 @@ function renderTurn() {
     tn.a.style.transform = `translate3d(${motion * 64 * (1 - Math.exp(-p * 3))}px,0,0)`;
     return;
   }
+  if (tn.gl) { glRender(); return; }
   if (tn.mode === "slide") {
     const x = motion * p * vw;
     tn.a.style.transform = `translate3d(${x}px,0,0)`;
@@ -641,7 +875,9 @@ function renderTurn() {
 function turnMove(dx) {
   if (!tn) return;
   tn.p = Math.max(0, Math.min(1, dx * tn.motion / viewer.clientWidth));
-  renderTurn();
+  // draw once per display frame, not once per touch event: keeps touch handling (and flick speed) exact
+  const my = tn;
+  if (!my.rq) my.rq = requestAnimationFrame(() => { my.rq = 0; if (tn === my && !my.released) renderTurn(); });
 }
 function turnAnimate(to, speed) {
   const my = tn;
@@ -669,15 +905,16 @@ async function turnFinish(done) {
   if (done) nbAround();
 }
 function turnReset() {
-  if (tn) cancelAnimationFrame(tn.raf);
+  if (tn) { cancelAnimationFrame(tn.raf); cancelAnimationFrame(tn.rq); }
   tn = null; turnEl.hidden = true; turnEl.innerHTML = ""; turnEl.classList.remove("ready");
-  viewer.classList.remove("turning");
+  viewer.classList.remove("turning"); glCurl.clear();
 }
 async function turnRelease(vx, cancel) {
   const my = tn; if (!my) return;
   const v = vx * my.motion;                              // px/ms in the direction of the turn
   const done = !cancel && !my.edge && (v > 0.3 || (my.p > 0.4 && v > -0.15));
   if (my.edge && my.p > 0.12) toast(my.forward ? "Last page" : "First page");
+  if (my.gl && !my.released) { my.p *= 0.5; my.released = true; my.relP = my.p; }   // drag scale -> turn scale
   const ok = await turnAnimate(done ? 1 : 0, Math.abs(vx));
   if (ok && tn === my) turnFinish(done);
 }
@@ -691,6 +928,7 @@ async function turnTo(forward) {
   if (target < 0 || target >= st.n) { toast(forward ? "Last page" : "First page"); return; }
   if (turnMode() === "none" || st.z.z > 1.001) return showPage(target);
   turnBegin(forward);
+  tn.released = true;                                    // a tap runs the whole turn (no drag scaling)
   const my = tn, e = nb.get(target);
   if (e && !e.url) await Promise.race([e.p, new Promise(r => setTimeout(r, 400))]);   // turnBegin rebuilds when it lands
   if (tn !== my) return;
@@ -775,13 +1013,15 @@ viewer.addEventListener("pointermove", e => {
   const dx = e.clientX - pd.x, dy = e.clientY - pd.y;
   if (pd.turning) {
     pd.hist.push([e.clientX, e.timeStamp]); if (pd.hist.length > 10) pd.hist.shift();
+    if (tn) tn.fy = e.clientY;
     turnMove(dx); return;
   }
   if (Math.abs(dx) + Math.abs(dy) > 10) pd.moved = true;
   if (st.z.z > 1 && pd.moved) { st.z.tx = pd.tx + dx; st.z.ty = pd.ty + dy; clampZ(); applyZ(); return; }
   if (!tn && st.z.z <= 1.001 && turnMode() !== "none" && Math.abs(dx) > 8 && Math.abs(dx) > Math.abs(dy) * 1.2) {
     pd.turning = true; pd.moved = true; clearTimeout(tapT); tapT = null;
-    turnBegin(settings.dir === "rtl" ? dx > 0 : dx < 0);
+    turnBegin(settings.dir === "rtl" ? dx > 0 : dx < 0, pd.y);
+    tn.fy = e.clientY;
     tn.drag = true; pd.hist = [[e.clientX, e.timeStamp]];
     turnMove(dx);
   }
@@ -1432,7 +1672,7 @@ document.addEventListener("click", e => {
 });
 
 /* ================= boot ================= */
-const APP_VERSION = "1.2.4";
+const APP_VERSION = "1.2.5";
 (async () => {
   settings = { ...DEF, ...(await kvGet("settings", {})) };
   st.vocab = await kvGet("vocab", []);
