@@ -100,8 +100,36 @@ select.field option{color:#111;background:#fff}
 #viewer{position:absolute;inset:0;touch-action:none;user-select:none;-webkit-user-select:none;overflow:hidden}
 #stage{position:absolute;left:0;top:0;transform-origin:0 0;will-change:transform}
 #stage.anim{transition:transform .22s ease}
-#pg{width:100%;height:100%;display:block;pointer-events:none;-webkit-user-drag:none;background:#fff}
-#overlay{position:absolute;inset:0}
+.pw{position:absolute;left:0;top:0;width:100%;height:100%}
+.pw[hidden]{display:none}
+#pg,#pg2{width:100%;height:100%;display:block;pointer-events:none;-webkit-user-drag:none;background:#fff}
+.ov{position:absolute;inset:0}
+/* two-page spread (1.2.6): the binding shades both pages towards the spine */
+#gutter,.tp.sp .gt{position:absolute;top:0;width:72px;pointer-events:none;background:linear-gradient(to right,rgba(0,0,0,0),rgba(0,0,0,.07) 34%,rgba(0,0,0,.19) 49.5%,rgba(255,255,255,.06) 50.5%,rgba(0,0,0,.07) 66%,rgba(0,0,0,0))}
+#gutter[hidden]{display:none}
+.tp.sp{background:var(--ink)}
+.tp.sp img{position:absolute;background:#fff}
+/* phone closed (1.2.6): the outer screen shows the book's cover, nothing else */
+#closed{position:fixed;inset:0;z-index:200;display:flex;align-items:center;justify-content:center;perspective:1800px;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
+#closed[hidden]{display:none}
+#closed::before{content:"";position:absolute;inset:0;background:radial-gradient(120% 85% at 50% 38%,#232229,#09090b 72%)}
+#closed .book{position:relative;z-index:0;transform-origin:100% 50%;-webkit-backface-visibility:hidden;backface-visibility:hidden;filter:drop-shadow(0 22px 34px rgba(0,0,0,.6)) drop-shadow(0 3px 6px rgba(0,0,0,.45))}
+#closed.ltr .book{transform-origin:0 50%}
+#closed .edges{position:absolute;z-index:-1;top:5px;bottom:5px;left:-6px;width:12px;border-radius:4px 0 0 4px;background:repeating-linear-gradient(to right,#ece7da 0 1px,#cfc7b6 1px 2px)}
+#closed.ltr .edges{left:auto;right:-6px;border-radius:0 4px 4px 0}
+#closed .face{position:relative;overflow:hidden;border-radius:7px 3px 3px 7px;line-height:0;background:#1d1c22}
+#closed.ltr .face{border-radius:3px 7px 7px 3px}
+#closed .face img{display:block;max-width:82vw;max-height:84vh;pointer-events:none;-webkit-user-drag:none}
+#closed .blank{width:min(70vw,58vh);aspect-ratio:.7;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;line-height:1.1;background:linear-gradient(160deg,#2b2a31,#141317);color:#f3efe6}
+#closed .blank b{font:700 72px/1 "Hiragino Mincho ProN",serif;color:var(--gold)}
+#closed .blank span{font:600 20px/1 system-ui;letter-spacing:.3em;text-transform:uppercase;opacity:.75}
+#closed .spine{position:absolute;top:0;bottom:0;right:0;width:7.5%;background:linear-gradient(to left,rgba(255,255,255,.16),rgba(0,0,0,.30) 26%,rgba(255,255,255,.12) 52%,rgba(0,0,0,.20) 78%,rgba(0,0,0,0))}
+#closed.ltr .spine{right:auto;left:0;transform:scaleX(-1)}
+#closed .sheen{position:absolute;inset:0;background:linear-gradient(118deg,rgba(255,255,255,.13),rgba(255,255,255,0) 38%,rgba(0,0,0,0) 62%,rgba(0,0,0,.14))}
+#closed.opening::before{opacity:0;transition:opacity .6s ease-in}
+#closed.opening .book{transform:rotateY(100deg);opacity:.35;transition:transform .62s cubic-bezier(.4,0,.6,1),opacity .62s cubic-bezier(.8,0,1,1)}
+#closed.ltr.opening .book{transform:rotateY(-100deg)}
+@media (prefers-reduced-motion: reduce){#closed.opening .book,#closed.opening::before{transition:none}}
 /* page turn (1.2.2): Books-style curl / slide that follows the finger */
 #turn{position:absolute;inset:0;z-index:2;pointer-events:none;perspective:2400px;overflow:hidden}
 #viewer.turning #stage{visibility:hidden}
@@ -248,7 +276,7 @@ button,select,input,[data-vol],[data-olmanga]{touch-action:manipulation}
 
 <!-- Reader -->
 <section id="reader" hidden>
-  <div id="viewer"><div id="stage"><img id="pg" alt=""><div id="overlay"></div></div><div id="turn" hidden></div></div>
+  <div id="viewer"><div id="stage"><div class="pw" id="pw0"><img id="pg" alt=""><div id="overlay" class="ov"></div></div><div class="pw" id="pw1" hidden><img id="pg2" alt=""><div id="overlay2" class="ov"></div></div><div id="gutter" hidden></div></div><div id="turn" hidden></div></div>
   <header id="top" class="bar">
     <button class="ib" data-act="close-reader" aria-label="Library"><svg viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg></button>
     <div class="ttl"><b id="volName"></b><span id="volSub"></span></div>
@@ -264,6 +292,7 @@ button,select,input,[data-vol],[data-olmanga]{touch-action:manipulation}
 </section>
 
 <section id="panel" hidden></section>
+<div id="closed" hidden aria-label="Book cover"><div class="book"><div class="edges"></div><div class="face"></div></div></div>
 <div id="busy" hidden><div><div class="spin"></div><div id="busyTxt">Working…</div></div></div>
 <div id="toast"></div>
 <input id="file" type="file" multiple hidden>
@@ -313,14 +342,16 @@ const kvGet = async (k, d) => { try { const r = await get("kv", k); return r ? r
 const kvSet = (k, v) => put("kv", { k, v });
 
 /* ================= state ================= */
-const DEF = { level: 3, furi: "above", dir: "rtl", boxes: true, turn: "curl" };
+const DEF = { level: 3, furi: "above", dir: "rtl", boxes: true, turn: "curl", spread: "auto", coverAlone: "on", outer: "cover" };
 let settings = { ...DEF };
 const st = {
   vol: null, pack: null, idx: 0, n: 0, url: null,
   z: { z: 1, tx: 0, ty: 0 }, base: { L: 0, T: 0, w: 0, h: 0 }, shift: 0,
-  sheet: null, vocab: []
+  sheet: null, vocab: [],
+  spread: false, unit: null, units: null, unitOf: null, unitsKey: "", slots: {}, fp: 0, url2: null
 };
 const viewer = $("#viewer"), stage = $("#stage"), img = $("#pg"), overlay = $("#overlay");
+const img2 = $("#pg2"), overlay2 = $("#overlay2"), pws = [$("#pw0"), $("#pw1")], gutterEl = $("#gutter");
 const sheet = $("#sheet"), sheetBody = $("#sheetBody"), panel = $("#panel"), reader = $("#reader"), slider = $("#slider");
 const fileIn = $("#file");
 const canSpeak = "speechSynthesis" in window && typeof SpeechSynthesisUtterance !== "undefined";
@@ -434,18 +465,47 @@ fileIn.addEventListener("change", async () => {
     toast(/quota/i.test(String(e && e.name)) ? "Not enough storage on this device." : "Import failed: " + (e && e.message || e));
   } finally { busy(""); renderLibrary(); }
 });
+// Page size from the image file's header (JPEG, PNG, GIF, WebP) without decoding it; null if unknown.
+function imgDims(buf) {
+  const b = new Uint8Array(buf), dv = new DataView(buf), n = b.length;
+  try {
+    if (b[0] === 0x89 && b[1] === 0x50 && n >= 24) return [dv.getUint32(16), dv.getUint32(20)];
+    if (b[0] === 0x47 && b[1] === 0x49 && n >= 10) return [dv.getUint16(6, true), dv.getUint16(8, true)];
+    if (b[0] === 0x52 && b[1] === 0x49 && b[8] === 0x57 && n >= 30) {
+      const t = String.fromCharCode(b[12], b[13], b[14], b[15]);
+      if (t === "VP8X") return [1 + (b[24] | b[25] << 8 | b[26] << 16), 1 + (b[27] | b[28] << 8 | b[29] << 16)];
+      if (t === "VP8L") { const v = dv.getUint32(21, true); return [1 + (v & 0x3fff), 1 + ((v >>> 14) & 0x3fff)]; }
+      if (t === "VP8 ") return [dv.getUint16(26, true) & 0x3fff, dv.getUint16(28, true) & 0x3fff];
+    }
+    if (b[0] === 0xff && b[1] === 0xd8) {
+      let o = 2;
+      while (o + 9 < n) {
+        if (b[o] !== 0xff) { o++; continue; }
+        const m = b[o + 1];
+        if (m === 0xff) { o++; continue; }
+        if (m === 0xd8 || m === 0x01 || (m >= 0xd0 && m <= 0xd7)) { o += 2; continue; }
+        if (m >= 0xc0 && m <= 0xcf && m !== 0xc4 && m !== 0xc8 && m !== 0xcc) return [dv.getUint16(o + 7), dv.getUint16(o + 5)];
+        o += 2 + dv.getUint16(o + 2);
+      }
+    }
+  } catch {}
+  return null;
+}
 async function importArchive(file, id, pack) {
   const zip = await JSZip.loadAsync(file);
   const names = Object.values(zip.files).filter(f => !f.dir && IMG_RE.test(f.name) && !/(^|\/)(__MACOSX|\.)/.test(f.name)).map(f => f.name).sort(nat);
   if (!names.length) throw new Error("no images in " + file.name);
   await tx(["pages"], "readwrite", t => { t.objectStore("pages").delete(IDBKeyRange.bound([id, 0], [id, Infinity])); });
+  const dims = [];
   for (let i = 0; i < names.length; i++) {
     if (i % 10 === 0) busy(`Importing ${file.name}… ${i}/${names.length}`);
-    const blob = new Blob([await zip.files[names[i]].async("arraybuffer")], { type: mimeFor(names[i]) });
+    const buf = await zip.files[names[i]].async("arraybuffer");
+    dims.push(imgDims(buf) || [0, 0]);
+    const blob = new Blob([buf], { type: mimeFor(names[i]) });
     await put("pages", { vol: id, i, name: names[i], blob });
   }
   const prev = await get("volumes", id);
-  const vol = { id, title: (pack && pack.title) || stemOf(file.name), names, pageCount: names.length, bytes: file.size,
+  const vol = { id, title: (pack && pack.title) || stemOf(file.name), names, pageCount: names.length, bytes: file.size, dims,
     addedAt: prev ? prev.addedAt : Date.now(), lastPage: prev ? prev.lastPage : 0, lastReadAt: prev ? prev.lastReadAt : 0,
     hasPack: false, bubbles: 0, repoId: prev ? prev.repoId : undefined };
   await put("volumes", vol);
@@ -486,28 +546,156 @@ async function openVolume(id) {
   turnReset(); nbClear();
   const pk = await get("packs", id);
   st.vol = vol; st.pack = pk ? pk.pages : null; st.n = vol.pageCount;
+  st.unit = null; st.units = null; st.unitsKey = "";
   reader.hidden = false; reader.classList.remove("hide-chrome"); $("#lib").hidden = true;
+  if (spreadOn()) buildUnits();
   await showPage(Math.min(vol.lastPage || 0, vol.pageCount - 1));
   if (!st.pack) toast("No reading pack for this volume. Import its .koma.json to get help.");
+  ensureDims(vol).then(() => { if (st.vol && st.vol.id === vol.id) refreshSpread(); });
 }
 function closeReader() {
   turnReset(); nbClear(); glCurl.flush();
   closeSheet(); reader.hidden = true; $("#lib").hidden = false;
   if (st.url) { URL.revokeObjectURL(st.url); st.url = null; }
+  if (st.url2) { URL.revokeObjectURL(st.url2); st.url2 = null; }
+  st.unit = null;
   renderLibrary();
 }
+
+/* ---- two-page spreads (1.2.6): on the open iPhone Duo in landscape the volume reads like an open book.
+   Right-to-left: the lower page sits on the right. The cover stands alone on the recto (left, where
+   page 1 falls in a Japanese book); wide scans (double-page art) fill the whole spread. ---- */
+const dimsJobs = new Map();
+function ensureDims(vol) {               // page sizes from file headers, once per volume (cached in its record)
+  if (vol.dims && vol.dims.length === vol.pageCount) return Promise.resolve(vol.dims);
+  if (dimsJobs.has(vol.id)) return dimsJobs.get(vol.id);
+  const job = (async () => {
+    const dims = [];
+    for (let i = 0; i < vol.pageCount; i++) {
+      let d = null;
+      try { const p = await get("pages", [vol.id, i]); if (p) d = imgDims(await p.blob.slice(0, 262144).arrayBuffer()); } catch {}
+      dims.push(d || [0, 0]);
+    }
+    const cur = await get("volumes", vol.id);
+    if (cur) { cur.dims = dims; if (st.vol && st.vol.id === vol.id) { cur.lastPage = st.vol.lastPage; cur.lastReadAt = st.vol.lastReadAt; } await put("volumes", cur); }
+    vol.dims = dims; if (st.vol && st.vol.id === vol.id) st.vol.dims = dims;
+    return dims;
+  })().finally(() => dimsJobs.delete(vol.id));
+  dimsJobs.set(vol.id, job);
+  return job;
+}
+const isWide = i => { const d = st.vol && st.vol.dims && st.vol.dims[i]; return !!(d && d[0] && d[0] > d[1] * 1.05); };
+function buildUnits() {
+  const n = st.n, u = [];
+  let i = 0;
+  if (settings.coverAlone !== "off" && n) { u.push([0]); i = 1; }
+  while (i < n) {
+    if (isWide(i)) { u.push([i]); i++; continue; }
+    if (i + 1 < n && !isWide(i + 1)) { u.push([i, i + 1]); i += 2; } else { u.push([i]); i++; }
+  }
+  st.units = u; st.unitOf = new Int32Array(n);
+  u.forEach((x, k) => x.forEach(p => { st.unitOf[p] = k; }));
+  st.unitsKey = `${st.vol.id}|${n}|${settings.coverAlone}|${st.vol.dims ? 1 : 0}`;
+}
+// Where each page of spread k sits on screen. Slot 0 holds the lower page (right in RTL), slot 1 the higher.
+function slotRects(k, dimOf) {
+  const vw = viewer.clientWidth, vh = viewer.clientHeight, half = vw / 2, rtl = settings.dir !== "ltr", unit = st.units[k];
+  const fit = (i, W) => { const [w, h] = dimOf(i); const s = w && h ? Math.min(W / w, vh / h) : 0; return s ? [w * s, h * s] : [W, vh]; };
+  if (unit.length === 1 && isWide(unit[0])) {
+    const [w, h] = fit(unit[0], vw);
+    return [{ i: unit[0], L: (vw - w) / 2, T: (vh - h) / 2, w, h, k: null }];
+  }
+  const slot = (i, s) => {
+    const [w, h] = fit(i, half), right = (s === 0) === rtl;
+    return { i, L: right ? half : half - w, T: (vh - h) / 2, w, h, k: s };
+  };
+  if (unit.length === 2) return [slot(unit[0], 0), slot(unit[1], 1)];
+  return [slot(unit[0], k === 0 && settings.coverAlone !== "off" ? 1 : 0)];
+}
+const spreadOn = () => screenMode === "spread" && settings.spread !== "off";
+function refreshSpread() {               // after a rotation, a setting change or page sizes arriving
+  if (reader.hidden || !st.vol) return;
+  const sp = spreadOn();
+  if (sp) {
+    const key = `${st.vol.id}|${st.n}|${settings.coverAlone}|${st.vol.dims ? 1 : 0}`;
+    if (!st.units || st.unitsKey !== key) { buildUnits(); if (st.spread) { turnReset(); return showPage(st.idx); } }
+  }
+  if (sp !== st.spread) { turnReset(); return showPage(st.idx); }
+  layout();
+}
+
+/* ---- fold-aware screens (1.2.6). Safari has no fold sensor, so the window's shape tells the screens apart:
+   iPhone Duo closed = outer screen, 466 x 678 pt (aspect ~1.45): the cover of the book, nothing else.
+   Open in landscape (~951 x 669 pt): two pages. Open in portrait, or any other portrait screen: one page. ---- */
+let screenMode = "single", peek = false;
+function detectMode() {
+  const w = innerWidth, h = innerHeight, s = Math.min(w, h), l = Math.max(w, h);
+  if (s <= 540 && l >= 560 && l / s <= 1.62) return "cover";
+  if (w > h && h >= 500 && w >= 800) return "spread";
+  return "single";
+}
+const closedEl = $("#closed");
+async function paintClosed() {
+  let vol = st.vol && !reader.hidden ? st.vol : null;
+  if (!vol) { const vols = await all("volumes"); vol = vols.filter(v => v.lastReadAt).sort((a, b) => b.lastReadAt - a.lastReadAt)[0] || null; }
+  const u = vol ? await coverUrl(vol) : "";
+  closedEl.classList.toggle("ltr", settings.dir === "ltr");
+  closedEl.querySelector(".face").innerHTML = u
+    ? `<img src="${u}" alt=""><i class="spine"></i><i class="sheen"></i>`
+    : `<div class="blank"><b>読</b><span>Koma</span></div><i class="spine"></i><i class="sheen"></i>`;
+  const im = closedEl.querySelector("img");
+  if (im) try { await im.decode(); } catch {}
+}
+let closedSeq = 0;
+async function setClosed(on) {
+  const my = ++closedSeq;
+  if (on) {
+    if (tn) turnLand();
+    closeSheet();
+    closedEl.classList.remove("opening");
+    if (closedEl.hidden) { await paintClosed(); if (my !== closedSeq) return; }
+    closedEl.hidden = false;
+    return;
+  }
+  if (closedEl.hidden) return;
+  if (reader.hidden || matchMedia("(prefers-reduced-motion: reduce)").matches) { closedEl.hidden = true; return; }
+  closedEl.classList.add("opening");                      // the cover swings open on its spine
+  setTimeout(() => { if (my === closedSeq) { closedEl.hidden = true; closedEl.classList.remove("opening"); } }, 640);
+}
+function applyScreen() {
+  const m = detectMode();
+  if (m !== "cover") peek = false;
+  screenMode = m;
+  setClosed(m === "cover" && settings.outer !== "read" && !peek);
+  refreshSpread();
+}
+let rzq = 0;
+addEventListener("resize", () => { cancelAnimationFrame(rzq); rzq = requestAnimationFrame(applyScreen); });
+let holdT = 0;
+closedEl.addEventListener("pointerdown", () => { clearTimeout(holdT); holdT = setTimeout(() => { peek = true; applyScreen(); }, 650); });
+for (const t of ["pointerup", "pointercancel", "pointerleave"]) closedEl.addEventListener(t, () => clearTimeout(holdT));
+closedEl.addEventListener("contextmenu", e => e.preventDefault());
+
 let seq = 0, saveT;
 async function showPage(i) {
   i = Math.max(0, Math.min(st.n - 1, i));
-  const my = ++seq; st.idx = i; closeSheet();
-  const p = await get("pages", [st.vol.id, i]);
-  if (my !== seq || !p) return;
-  const u = URL.createObjectURL(p.blob);
-  img.src = u;
-  try { await img.decode(); } catch {}
-  if (my !== seq) { URL.revokeObjectURL(u); return; }
+  const spread = spreadOn();
+  if (spread && !st.units) buildUnits();
+  const unit = spread ? st.units[st.unitOf[i]] : [i];
+  i = unit[0];
+  const my = ++seq; st.idx = i; st.fp = i; closeSheet();
+  const recs = await Promise.all(unit.map(k => get("pages", [st.vol.id, k])));
+  if (my !== seq || recs.some(r => !r)) return;
+  const urls = recs.map(r => URL.createObjectURL(r.blob));
+  img.src = urls[0];
+  if (urls[1]) img2.src = urls[1];
+  await Promise.all([img.decode().catch(() => {}), urls[1] ? img2.decode().catch(() => {}) : null]);
+  if (my !== seq) { urls.forEach(u => URL.revokeObjectURL(u)); return; }
   if (st.url) URL.revokeObjectURL(st.url);
-  st.url = u;
+  if (st.url2) URL.revokeObjectURL(st.url2);
+  st.url = urls[0]; st.url2 = urls[1] || null;
+  if (!urls[1]) img2.removeAttribute("src");
+  st.unit = unit; st.spread = spread;
   st.z = { z: 1, tx: 0, ty: 0 }; st.shift = 0; layout(); renderOverlay(); updateChrome();
   clearTimeout(saveT);
   saveT = setTimeout(() => { st.vol.lastPage = i; st.vol.lastReadAt = Date.now(); put("volumes", st.vol); }, 800);
@@ -542,14 +730,37 @@ function nbLoad(i) {
 }
 function nbAround() {
   if (tn) return;
-  for (const [i, e] of nb) if (Math.abs(i - st.idx) > 2) { if (e.url) URL.revokeObjectURL(e.url); nb.delete(i); }
-  const a = nbLoad(st.idx + 1), b = nbLoad(st.idx - 1), vol = st.vol && st.vol.id, idx = st.idx;
+  let want;
+  if (st.spread && st.units) {                          // the spreads either side of this one
+    const k = st.unitOf[st.idx];
+    want = [k - 1, k + 1].filter(x => x >= 0 && x < st.units.length).flatMap(x => st.units[x]);
+  } else want = [st.idx + 1, st.idx - 1];
+  const span = [...want, ...(st.unit || [st.idx])], lo = Math.min(...span) - 1, hi = Math.max(...span) + 1;
+  for (const [i, e] of nb) if (i < lo || i > hi) { if (e.url) URL.revokeObjectURL(e.url); nb.delete(i); }
+  const es = want.map(nbLoad).filter(Boolean), vol = st.vol && st.vol.id, idx = st.idx;
   if (turnMode() !== "curl") return;
-  // upload the current page and its neighbours to the GPU while the reader is idle
-  Promise.all([a && a.p, b && b.p]).then(() => {
-    const go = () => { if (!tn && st.vol && st.vol.id === vol && st.idx === idx) glCurl.warm([img, a && a.img, b && b.img]); };
+  // upload the pages on screen and their neighbours to the GPU while the reader is idle
+  Promise.all(es.map(e => e.p)).then(() => {
+    const go = () => { if (!tn && st.vol && st.vol.id === vol && st.idx === idx) glCurl.warm([img, st.url2 ? img2 : null, ...es.map(e => e.img)]); };
     window.requestIdleCallback ? requestIdleCallback(go, { timeout: 600 }) : setTimeout(go, 120);
   });
+}
+// The page (or spread) a turn goes to: { k: spread index or null, i: its first page, or -1 / st.n past the ends }
+function turnTarget(forward) {
+  if (st.spread && st.units) {
+    const k = st.unitOf[st.idx] + (forward ? 1 : -1);
+    return { k, i: k < 0 ? -1 : k >= st.units.length ? st.n : st.units[k][0] };
+  }
+  return { k: null, i: st.idx + (forward ? 1 : -1) };
+}
+// A whole spread as one pane (slide turns and the rubber band at the ends)
+function spreadPane(rs, pg) {
+  const el = document.createElement("div");
+  el.className = "tp slide sp";
+  el.style.cssText = "left:0;top:0;width:100%;height:100%";
+  el.innerHTML = rs.map(r => { const p = pg(r.i); return `<img src="${p && p.url ? p.url : ""}" alt="" style="left:${r.L}px;top:${r.T}px;width:${r.w}px;height:${r.h}px">`; }).join("") +
+    (rs.length && rs[0].k != null ? `<div class="gt" style="left:${viewer.clientWidth / 2 - 36}px;top:${Math.min(...rs.map(r => r.T))}px;height:${Math.max(...rs.map(r => r.h))}px"></div>` : "");
+  return el;
 }
 let tn = null;                                          // the turn in progress
 const turnMode = () => ["curl", "slide", "none"].includes(settings.turn) ? settings.turn : "curl";
@@ -575,18 +786,23 @@ function makePane(pg, back, extra) {
    the curl throws a soft shadow on the page below. Falls back to the CSS fold without WebGL. ---- */
 const glCurl = (() => {
   let cv = null, gl = null, prog = null, failed = false, U = {}, aPos = -1;
-  let meshBuf = null, idxBuf = null, nIdx = 0, meshKey = "", quadBuf = null, texMov = null, texUnd = null, rMov = null, rUnd = null;
+  let meshBuf = null, idxBuf = null, nIdx = 0, meshKey = "", quadBuf = null, quadBufS = null;
+  let texMov = null, texUnd = null, texBack = null, texStat = null, rMov = null, rUnd = null, sp = null;
   const VS = `
 attribute vec2 aPos;
 uniform vec2 uView; uniform vec4 uRect; uniform vec4 uMov; uniform float uMirror;
 uniform vec2 uP; uniform vec2 uN; uniform float uR; uniform float uCurl; uniform float uZ;
-varying vec2 vUV; varying float vA; varying float vD;
+uniform vec4 uBackRect; uniform float uSpine;
+varying vec2 vUV; varying vec2 vUVb; varying vec2 vQ; varying float vA; varying float vD;
 const float PI = 3.14159265;
 void main() {
   vUV = aPos / uRect.zw;
   vec2 scr = uRect.xy + aPos;
+  // spread: the page on the leaf's back is where this point lands once the leaf has turned over the spine
+  vUVb = (vec2(2.0 * uSpine - scr.x, scr.y) - uBackRect.xy) / uBackRect.zw;
   vec2 q = scr - uMov.xy;
   if (uMirror > 0.5) q.x = uMov.z - q.x;             // logical page space: spine at x = 0
+  vQ = q;
   float d = dot(q - uP, uN);
   vD = d; vA = 0.0;
   float z = 0.0;
@@ -602,13 +818,26 @@ void main() {
 }`;
   const FS = `
 precision highp float;
-uniform sampler2D uTex; uniform float uUnder; uniform float uDim; uniform float uShadow; uniform float uR;
-varying vec2 vUV; varying float vA; varying float vD;
+uniform sampler2D uTex; uniform sampler2D uBack;
+uniform float uUnder; uniform float uStatic; uniform float uDim; uniform float uShadow; uniform float uR;
+uniform float uBackOn; uniform float uGut; uniform vec2 uN; uniform vec4 uMov;
+varying vec2 vUV; varying vec2 vUVb; varying vec2 vQ; varying float vA; varying float vD;
+const float PI = 3.14159265;
+float gutter() { return 1.0 - uGut * 0.14 * (1.0 - smoothstep(0.0, 36.0, abs(vQ.x))); }   // binding shade (spreads)
 void main() {
   vec3 c = texture2D(uTex, vUV).rgb;
+  if (uStatic > 0.5) {
+    // spread, far half: soft shadow just beyond the edge of the leaf landing on it.
+    // p = the leaf point that lands here (inverse of the flat, turned-over part of the roll).
+    vec2 p = vQ + uN * (PI * uR - 2.0 * vD);
+    float o = p.x - uMov.z;
+    float sh = (vD < 0.0 && o > 0.0) ? 1.0 - smoothstep(0.0, 24.0 + 2.0 * uR, o) : 0.0;
+    gl_FragColor = vec4(c * (1.0 - 0.32 * sh * uShadow) * gutter(), 1.0);
+    return;
+  }
   if (uUnder > 0.5) {
     float sh = 1.0 - smoothstep(uR * 0.5, uR * 0.5 + 70.0, vD);
-    c *= (1.0 - 0.42 * sh * uShadow) * (1.0 - uDim);
+    c *= (1.0 - 0.42 * sh * uShadow) * (1.0 - uDim) * gutter();
     gl_FragColor = vec4(c, 1.0);
     return;
   }
@@ -616,7 +845,12 @@ void main() {
   if (ca >= 0.0) {
     float l = 1.0 - 0.40 * (1.0 - ca);
     float sx = clamp(sin(vA * 1.6), 0.0, 1.0); float s2 = sx * sx, s4 = s2 * s2; float hl = 0.14 * s4 * s4 * s2;
-    gl_FragColor = vec4(c * l + hl, 1.0);
+    gl_FragColor = vec4((c * l + hl) * gutter(), 1.0);
+  } else if (uBackOn > 0.5) {
+    // spread: the back of the leaf is the next page itself
+    vec2 uv = vUVb;
+    vec3 b = (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) ? vec3(1.0) : texture2D(uBack, uv).rgb;
+    gl_FragColor = vec4(b * (0.70 + 0.30 * (-ca)) * gutter(), 1.0);
   } else {
     vec3 b = mix(vec3(0.957, 0.945, 0.918), c, 0.12);
     gl_FragColor = vec4(b * (0.70 + 0.30 * (-ca)), 1.0);
@@ -640,9 +874,10 @@ void main() {
       if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
       gl.useProgram(prog);
       aPos = gl.getAttribLocation(prog, "aPos");
-      for (const n of ["uView", "uRect", "uMov", "uMirror", "uP", "uN", "uR", "uCurl", "uZ", "uTex", "uUnder", "uDim", "uShadow"])
+      for (const n of ["uView", "uRect", "uMov", "uMirror", "uP", "uN", "uR", "uCurl", "uZ", "uTex", "uUnder", "uDim", "uShadow",
+                       "uBack", "uBackRect", "uSpine", "uBackOn", "uGut", "uStatic"])
         U[n] = gl.getUniformLocation(prog, n);
-      meshBuf = gl.createBuffer(); idxBuf = gl.createBuffer(); quadBuf = gl.createBuffer();
+      meshBuf = gl.createBuffer(); idxBuf = gl.createBuffer(); quadBuf = gl.createBuffer(); quadBufS = gl.createBuffer();
       cv.addEventListener("webglcontextlost", e => {
         e.preventDefault(); gl = null; failed = true;
         if (tn && tn.gl) { tn.gl = false; turnBuild(); renderTurn(); }
@@ -660,9 +895,9 @@ void main() {
     let t = texCache.get(key);
     if (t) { texCache.delete(key); texCache.set(key, t); return t; }      // refresh LRU position
     t = makeTex(im); texCache.set(key, t);
-    while (texCache.size > 5) {
+    while (texCache.size > 9) {                          // a spread turn uses four pages at once
       const [k, old] = texCache.entries().next().value;
-      if (old === texMov || old === texUnd) break;
+      if (old === texMov || old === texUnd || old === texBack || old === texStat) break;
       gl.deleteTexture(old); texCache.delete(k);
     }
     return t;
@@ -670,7 +905,7 @@ void main() {
   function warm(images) { if (init()) for (const im of images) if (im && im.naturalWidth) tex(im); }
   function flush() {
     if (gl) for (const t of texCache.values()) gl.deleteTexture(t);
-    texCache.clear(); texMov = texUnd = null;
+    texCache.clear(); texMov = texUnd = texBack = texStat = null;
   }
   function makeTex(im) {
     const t = gl.createTexture();
@@ -713,11 +948,15 @@ void main() {
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, idxBuf); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, idx, gl.STATIC_DRAW);
     nIdx = idx.length;
   }
-  function scene(movIm, movRect, undIm, undRect) {
-    texMov = tex(movIm); texUnd = tex(undIm); rMov = movRect; rUnd = undRect;
+  const quad = (buf, r) => { gl.bindBuffer(gl.ARRAY_BUFFER, buf); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0, 0, r.w, 0, 0, r.h, r.w, r.h]), gl.STATIC_DRAW); };
+  // undRect null = nothing under the turning page (an empty half of a spread).
+  // spread: { back: { im, r }, stat: { im, r } | null, spine } — the page on the leaf's back and the far half.
+  function scene(movIm, movRect, undIm, undRect, spread) {
+    texMov = tex(movIm); rMov = movRect; rUnd = undRect; texUnd = undRect ? tex(undIm) : null;
+    sp = spread || null; texBack = sp ? tex(sp.back.im) : null; texStat = sp && sp.stat ? tex(sp.stat.im) : null;
     mesh(movRect.w, movRect.h);
-    gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0, 0, undRect.w, 0, 0, undRect.h, undRect.w, undRect.h]), gl.STATIC_DRAW);
+    if (undRect) quad(quadBuf, undRect);
+    if (sp && sp.stat) quad(quadBufS, sp.stat.r);
   }
   function draw(g) {                                        // g: { mirror, P, N, R, dim, shadow }
     const dpr = Math.min(2, window.devicePixelRatio || 1), vw = viewer.clientWidth, vh = viewer.clientHeight;
@@ -732,15 +971,30 @@ void main() {
     gl.uniform4f(U.uMov, rMov.L, rMov.T, rMov.w, rMov.h);
     gl.uniform1f(U.uMirror, g.mirror ? 1 : 0);
     gl.uniform2f(U.uP, g.P[0], g.P[1]); gl.uniform2f(U.uN, g.N[0], g.N[1]); gl.uniform1f(U.uR, g.R);
+    const br = sp ? sp.back.r : rMov;
+    gl.uniform4f(U.uBackRect, br.L, br.T, br.w, br.h);
+    gl.uniform1f(U.uSpine, sp ? sp.spine : 0); gl.uniform1f(U.uBackOn, sp ? 1 : 0); gl.uniform1f(U.uGut, sp ? 1 : 0);
+    gl.uniform1i(U.uBack, 1); gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, texBack || texMov);
     gl.uniform1i(U.uTex, 0); gl.activeTexture(gl.TEXTURE0);
     gl.enableVertexAttribArray(aPos);
-    // page underneath: flat, dimmed, with the curl's shadow
-    gl.uniform4f(U.uRect, rUnd.L, rUnd.T, rUnd.w, rUnd.h);
-    gl.uniform1f(U.uCurl, 0); gl.uniform1f(U.uZ, 0.9); gl.uniform1f(U.uUnder, 1);
+    gl.uniform1f(U.uCurl, 0); gl.uniform1f(U.uZ, 0.9); gl.uniform1f(U.uStatic, 0);
     gl.uniform1f(U.uDim, g.dim); gl.uniform1f(U.uShadow, g.shadow);
-    gl.bindTexture(gl.TEXTURE_2D, texUnd);
-    gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf); gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
-    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    // page underneath: flat, dimmed, with the curl's shadow
+    if (rUnd) {
+      gl.uniform4f(U.uRect, rUnd.L, rUnd.T, rUnd.w, rUnd.h); gl.uniform1f(U.uUnder, 1);
+      gl.bindTexture(gl.TEXTURE_2D, texUnd);
+      gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf); gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    }
+    // spread: the far half, which the leaf lands on
+    if (sp && sp.stat) {
+      const r = sp.stat.r;
+      gl.uniform4f(U.uRect, r.L, r.T, r.w, r.h); gl.uniform1f(U.uUnder, 0); gl.uniform1f(U.uStatic, 1);
+      gl.bindTexture(gl.TEXTURE_2D, texStat);
+      gl.bindBuffer(gl.ARRAY_BUFFER, quadBufS); gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      gl.uniform1f(U.uStatic, 0);
+    }
     // the turning page, wrapped around the cylinder
     gl.uniform4f(U.uRect, rMov.L, rMov.T, rMov.w, rMov.h);
     gl.uniform1f(U.uCurl, 1); gl.uniform1f(U.uZ, 0.5); gl.uniform1f(U.uUnder, 0);
@@ -749,7 +1003,7 @@ void main() {
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, idxBuf);
     gl.drawElements(gl.TRIANGLES, nIdx, gl.UNSIGNED_SHORT, 0);
   }
-  function clear() { texMov = texUnd = null; }             // textures stay cached for the next turn
+  function clear() { texMov = texUnd = texBack = texStat = null; sp = null; }   // textures stay cached for the next turn
   return { init, scene, draw, clear, warm, flush, canvas: () => cv, rect: () => rMov };
 })();
 function glRender() {
@@ -757,9 +1011,12 @@ function glRender() {
   // past the spine as the turn completes (s 0 -> 1). The fold axis is the perpendicular bisector of the
   // corner's start and current positions, kept off the spine so the page never tears from the binding.
   const t = tn, m = glCurl.rect(), w = m.w, h = m.h;
-  const sRaw = t.released ? t.p : 0.5 * t.p;
+  // Spread: the leaf turns over the spine and lands on the far half, so the corner travels 2w, the roll
+  // tightens to nothing as it lands, and the corner tracks the finger 1:1 (single page: half speed).
+  const sRaw = t.released ? t.p : t.k * t.p;
   const s = Math.max(0, Math.min(1, t.forward ? sRaw : 1 - sRaw));
-  const R0 = Math.max(16, Math.min(60, w * 0.11)), R = R0 * (1 - 0.6 * s);
+  const R0 = Math.max(16, Math.min(60, w * 0.11));
+  const R = t.spread ? Math.max(0.5, R0 * (1 - s)) : R0 * (1 - 0.6 * s);
   const cy0 = Math.max(0, Math.min(h, t.fy0 - m.T));
   let tilt = 1;
   if (t.released && t.relP != null) {
@@ -767,7 +1024,7 @@ function glRender() {
     tilt = span > 1e-3 ? 1 - Math.min(1, Math.abs(t.p - t.relP) / span) : 0;
   }
   const fy = cy0 + ((t.fy ?? t.fy0) - t.fy0) * tilt;
-  const Fx = w - s * (2 * w + 2 * Math.PI * R0), Fy = Math.max(-h * 0.25, Math.min(h * 1.25, fy));
+  const Fx = t.spread ? w - s * 2 * w : w - s * (2 * w + 2 * Math.PI * R0), Fy = Math.max(-h * 0.25, Math.min(h * 1.25, fy));
   let N = [1, 0], P = [w + 4 * R0, cy0];                        // s = 0: nothing curls
   const dx = w - Fx, dy = cy0 - Fy;
   if (dx > 0.5) {
@@ -781,24 +1038,67 @@ function glRender() {
   glCurl.draw({ mirror: !t.ltr, P, N, R, dim: 0.22 * (1 - s), shadow });
 }
 function turnBegin(forward, fy) {
-  const target = st.idx + (forward ? 1 : -1), ltr = settings.dir === "ltr";
+  const tg = turnTarget(forward), target = tg.i, ltr = settings.dir === "ltr", spread = !!(st.spread && st.units);
   const vh = viewer.clientHeight, tap = fy == null;
-  tn = { forward, target, ltr, mode: turnMode(), p: 0, raf: 0,
+  tn = { forward, target, tu: tg.k, spread, k: spread ? 1 : 0.5, ltr, mode: turnMode(), p: 0, raf: 0,
          motion: forward !== ltr ? 1 : -1,            // +1: the page moves right on screen
          edge: target < 0 || target >= st.n,
          fy0: tap ? vh * 0.84 : fy, fy: tap ? vh * 0.76 : fy };   // taps curl from the lower corner
   if (st.sheet) closeSheet();
   turnBuild();
   if (!tn.edge) {
-    const e = nbLoad(target), my = tn;
-    if (!e.url) e.p.then(() => { if (tn === my) { turnBuild(); renderTurn(); } });
+    const es = (spread ? st.units[tg.k] : [target]).map(nbLoad).filter(e => e && !e.url), my = tn;
+    if (es.length) Promise.all(es.map(e => e.p)).then(() => { if (tn === my) { turnBuild(); renderTurn(); } });
   }
+}
+// Spread turn: the leaf is the earlier spread's second page (left in RTL); it turns over the spine and
+// lands on the far half showing the later spread's first page, revealing that spread's second page
+// beneath. Going back plays the same turn in reverse. Wide pages and empty leaves slide instead.
+function turnBuildSpread() {
+  const cu = st.unitOf[st.idx];
+  const pg = i => {
+    if (st.unit && i === st.unit[0]) return { url: st.url, w: img.naturalWidth, h: img.naturalHeight, img };
+    if (st.unit && i === st.unit[1]) return { url: st.url2, w: img2.naturalWidth, h: img2.naturalHeight, img: img2 };
+    const e = nb.get(i); return e && e.url ? e : null;
+  };
+  const dimOf = i => { const p = pg(i); if (p && p.w) return [p.w, p.h]; const d = st.vol.dims && st.vol.dims[i]; return d && d[0] ? d : [img.naturalWidth, img.naturalHeight]; };
+  const curRs = slotRects(cu, dimOf);
+  turnEl.hidden = false;
+  if (tn.edge) { tn.a = spreadPane(curRs, pg); turnEl.appendChild(tn.a); return true; }
+  const tgtRs = slotRects(tn.tu, dimOf);
+  const xr = tn.forward ? curRs : tgtRs, yr = tn.forward ? tgtRs : curRs;
+  const slot = (rs, s) => rs.find(r => r.k === s) || null, im = r => r && pg(r.i) ? pg(r.i).img : null;
+  const leaf = slot(xr, 1), back = slot(yr, 0);
+  const flat = xr.some(r => r.k == null) || yr.some(r => r.k == null);
+  if (tn.mode === "curl" && leaf && back && !flat && glCurl.init()) {
+    const under = slot(yr, 1), stat = slot(xr, 0);
+    tn.gl = true;
+    glCurl.scene(im(leaf), leaf, im(under), under, { back: { im: im(back), r: back }, stat: stat ? { im: im(stat), r: stat } : null, spine: viewer.clientWidth / 2 });
+    turnEl.appendChild(glCurl.canvas());
+    glRender();
+    turnEl.classList.add("ready"); viewer.classList.add("turning");
+    return false;
+  }
+  tn.gl = false;
+  tn.a = spreadPane(curRs, pg); tn.b = spreadPane(tgtRs, pg);
+  turnEl.append(tn.b, tn.a);
+  return true;
 }
 function turnBuild() {
   const cur = { url: st.url, w: img.naturalWidth, h: img.naturalHeight };
   const e = tn.edge ? null : nb.get(tn.target);
   const oth = e && e.url ? e : { url: "", w: cur.w, h: cur.h };
   turnEl.innerHTML = ""; turnEl.classList.remove("ready");
+  if (tn.spread) {
+    if (turnBuildSpread()) {
+      const my = tn;
+      Promise.all([...turnEl.querySelectorAll("img")].map(i => i.decode().catch(() => {}))).then(() => {
+        if (tn !== my) return;
+        turnEl.classList.add("ready"); viewer.classList.add("turning");
+      });
+    }
+    return;
+  }
   if (tn.mode === "curl" && !tn.edge && glCurl.init()) {
     const curIm = img, othIm = e && e.url && e.img ? e.img : null;
     const movIm = tn.forward ? curIm : othIm, undIm = tn.forward ? othIm : curIm;
@@ -844,7 +1144,7 @@ function renderTurn() {
     return;
   }
   if (tn.gl) { glRender(); return; }
-  if (tn.mode === "slide") {
+  if (tn.mode === "slide" || tn.spread) {                // spreads without the WebGL curl slide as a whole
     const x = motion * p * vw;
     tn.a.style.transform = `translate3d(${x}px,0,0)`;
     tn.b.style.transform = `translate3d(${x - motion * (vw + 14)}px,0,0)`;
@@ -914,23 +1214,23 @@ async function turnRelease(vx, cancel) {
   const v = vx * my.motion;                              // px/ms in the direction of the turn
   const done = !cancel && !my.edge && (v > 0.3 || (my.p > 0.4 && v > -0.15));
   if (my.edge && my.p > 0.12) toast(my.forward ? "Last page" : "First page");
-  if (my.gl && !my.released) { my.p *= 0.5; my.released = true; my.relP = my.p; }   // drag scale -> turn scale
+  if (my.gl && !my.released) { my.p *= my.k; my.released = true; my.relP = my.p; }   // drag scale -> turn scale
   const ok = await turnAnimate(done ? 1 : 0, Math.abs(vx));
   if (ok && tn === my) turnFinish(done);
 }
 async function turnTo(forward) {
-  const target = st.idx + (forward ? 1 : -1);
   if (tn) {                                              // tapped again mid-turn: land the current one now
     if (tn.drag) return;
     await turnLand();
     return turnTo(forward);
   }
+  const tg = turnTarget(forward), target = tg.i;
   if (target < 0 || target >= st.n) { toast(forward ? "Last page" : "First page"); return; }
   if (turnMode() === "none" || st.z.z > 1.001) return showPage(target);
   turnBegin(forward);
   tn.released = true;                                    // a tap runs the whole turn (no drag scaling)
-  const my = tn, e = nb.get(target);
-  if (e && !e.url) await Promise.race([e.p, new Promise(r => setTimeout(r, 400))]);   // turnBegin rebuilds when it lands
+  const my = tn, es = (tn.spread ? st.units[tg.k] : [target]).map(i => nb.get(i)).filter(e => e && !e.url);
+  if (es.length) await Promise.race([Promise.all(es.map(e => e.p)), new Promise(r => setTimeout(r, 400))]);   // turnBegin rebuilds when it lands
   if (tn !== my) return;
   const ok = await turnAnimate(1, 0);
   if (ok && tn === my) turnFinish(true);
@@ -947,16 +1247,18 @@ function flickVx(hist) {
   const dt = last[1] - first[1];
   return dt > 0 ? (last[0] - first[0]) / dt : 0;
 }
-const curPage = () => st.pack ? st.pack[st.idx] : null;
+const curPage = () => st.pack ? st.pack[st.fp != null ? st.fp : st.idx] : null;   // the page the word sheet is about
 function updateChrome() {
+  const u = st.unit || [st.idx], lab = u.length > 1 ? `${u[0] + 1}–${u[1] + 1}` : `${u[0] + 1}`;
   $("#volName").textContent = st.vol.title;
-  $("#volSub").textContent = `${st.idx + 1} / ${st.n}`;
-  $("#pnum").textContent = `${st.idx + 1} / ${st.n}`;
+  $("#volSub").textContent = `${lab} / ${st.n}`;
+  $("#pnum").textContent = `${lab} / ${st.n}`;
   slider.max = st.n; slider.value = st.idx + 1; slider.dir = settings.dir;
-  const p = curPage(); const b = $("#boxBtn");
+  const nB = st.pack ? u.reduce((s, i) => s + (st.pack[i] && st.pack[i].bubbles ? st.pack[i].bubbles.length : 0), 0) : 0;
+  const b = $("#boxBtn");
   b.hidden = !st.pack;
   b.classList.toggle("off", !settings.boxes);
-  b.innerHTML = `読${p && p.bubbles.length ? `<small>${p.bubbles.length}</small>` : ""}`;
+  b.innerHTML = `読${nB ? `<small>${nB}</small>` : ""}`;
 }
 slider.addEventListener("input", () => { $("#pnum").textContent = `${slider.value} / ${st.n}`; });
 slider.addEventListener("change", () => showPage(+slider.value - 1));
@@ -966,10 +1268,27 @@ $("#boxBtn").addEventListener("click", () => { settings.boxes = !settings.boxes;
 function layout() {
   if (!img.naturalWidth) return;
   const vw = viewer.clientWidth, vh = viewer.clientHeight;
-  const s = Math.min(vw / img.naturalWidth, vh / img.naturalHeight);
-  const w = img.naturalWidth * s, h = img.naturalHeight * s;
-  st.base = { L: (vw - w) / 2, T: (vh - h) / 2, w, h };
-  stage.style.width = w + "px"; stage.style.height = h + "px";
+  const place = (k, s) => Object.assign(pws[k].style, { left: s.x + "px", top: s.y + "px", width: s.w + "px", height: s.h + "px" });
+  st.slots = {};
+  if (st.spread && st.unit && st.units) {
+    // the stage spans the spread; each page sits in its slot, the binding shaded at the spine
+    const dimOf = i => i === st.unit[1] ? [img2.naturalWidth, img2.naturalHeight] : [img.naturalWidth, img.naturalHeight];
+    const rs = slotRects(st.unitOf[st.idx], dimOf);
+    const L = Math.min(...rs.map(r => r.L)), T = Math.min(...rs.map(r => r.T));
+    const R = Math.max(...rs.map(r => r.L + r.w)), B = Math.max(...rs.map(r => r.T + r.h));
+    st.base = { L, T, w: R - L, h: B - T };
+    rs.forEach((r, k) => { const s = { x: r.L - L, y: r.T - T, w: r.w, h: r.h }; st.slots[r.i] = s; place(k, s); });
+    pws[1].hidden = rs.length < 2;
+    gutterEl.hidden = rs[0].k == null;
+    if (!gutterEl.hidden) Object.assign(gutterEl.style, { left: (vw / 2 - L - 36) + "px", top: "0px", height: (B - T) + "px" });
+  } else {
+    const s = Math.min(vw / img.naturalWidth, vh / img.naturalHeight);
+    const w = img.naturalWidth * s, h = img.naturalHeight * s;
+    st.base = { L: (vw - w) / 2, T: (vh - h) / 2, w, h };
+    st.slots[st.idx] = { x: 0, y: 0, w, h }; place(0, st.slots[st.idx]);
+    pws[1].hidden = true; gutterEl.hidden = true;
+  }
+  stage.style.width = st.base.w + "px"; stage.style.height = st.base.h + "px";
   clampZ(); applyZ();
 }
 function applyZ() { const { L, T } = st.base, z = st.z; stage.style.transform = `translate(${L + z.tx}px,${T + z.ty + st.shift}px) scale(${z.z})`; }
@@ -1045,7 +1364,7 @@ function onUp(e) {
     return;
   }
   const bx = p.target && p.target.closest && p.target.closest(".bx");
-  if (bx) { clearTimeout(tapT); tapT = null; openSheet(+bx.dataset.i); return; }
+  if (bx) { clearTimeout(tapT); tapT = null; openSheet(+bx.dataset.i, +bx.dataset.pg); return; }
   const now = Date.now();
   if (tapT && now - lastTap < 300) {
     clearTimeout(tapT); tapT = null;
@@ -1073,16 +1392,19 @@ document.addEventListener("keydown", e => {
 
 /* overlay */
 function renderOverlay() {
-  overlay.innerHTML = "";
-  const p = curPage();
-  if (!p || !settings.boxes) return;
-  const on = st.sheet ? st.sheet.bi : -1;
-  p.bubbles.forEach((b, i) => {
-    const [x, y, w, h] = b.box; const el = document.createElement("div");
-    el.className = "bx" + (i === on ? " on" : "") + (b.kind === "sfx" ? " sfx" : "");
-    el.style.left = x * 100 + "%"; el.style.top = y * 100 + "%"; el.style.width = w * 100 + "%"; el.style.height = h * 100 + "%";
-    el.dataset.i = i; el.innerHTML = `<i>${i + 1}</i>`;
-    overlay.appendChild(el);
+  const ovs = [overlay, overlay2];
+  ovs.forEach(o => { o.innerHTML = ""; });
+  if (!st.pack || !settings.boxes) return;
+  (st.unit || [st.idx]).forEach((pi, k) => {             // each page of a spread has its own boxes
+    const p = st.pack[pi]; if (!p || !p.bubbles) return;
+    const on = st.sheet && st.fp === pi ? st.sheet.bi : -1;
+    p.bubbles.forEach((b, i) => {
+      const [x, y, w, h] = b.box; const el = document.createElement("div");
+      el.className = "bx" + (i === on ? " on" : "") + (b.kind === "sfx" ? " sfx" : "");
+      el.style.left = x * 100 + "%"; el.style.top = y * 100 + "%"; el.style.width = w * 100 + "%"; el.style.height = h * 100 + "%";
+      el.dataset.i = i; el.dataset.pg = pi; el.innerHTML = `<i>${i + 1}</i>`;
+      ovs[k].appendChild(el);
+    });
   });
 }
 
@@ -1106,7 +1428,8 @@ const KIND = { speech: "Speech", thought: "Thought", narration: "Narration", sig
 const vid = t => t.b + "|" + t.r;
 const isSaved = t => st.vocab.some(v => v.id === vid(t));
 
-function openSheet(bi) {
+function openSheet(bi, pg) {
+  if (pg != null && !Number.isNaN(pg)) st.fp = pg;
   const p = curPage(); if (!p || !p.bubbles[bi]) return;
   st.sheet = { bi, ti: -1, tl: false, note: false };
   renderSheet(); sheet.classList.add("open"); reader.classList.add("sheet-open"); renderOverlay();
@@ -1121,7 +1444,8 @@ function closeSheet() {
 function keepBubbleVisible() {
   const p = curPage(); if (!p || !st.sheet) return;
   const b = p.bubbles[st.sheet.bi]; const z = st.z, { T, h } = st.base;
-  const top = T + z.ty + z.z * b.box[1] * h, bottom = T + z.ty + z.z * (b.box[1] + b.box[3]) * h;
+  const sl = (st.slots && st.slots[st.fp]) || { y: 0, h };   // the box's page within the stage (spreads)
+  const top = T + z.ty + z.z * (sl.y + b.box[1] * sl.h), bottom = T + z.ty + z.z * (sl.y + (b.box[1] + b.box[3]) * sl.h);
   const limit = viewer.clientHeight - sheet.offsetHeight - 14;
   let shift = 0;
   if (bottom > limit) { shift = limit - bottom; if (top + shift < 12) shift = 12 - top; }
@@ -1632,6 +1956,8 @@ async function openSettings() {
       <div class="grp"><h3>Furigana</h3>${seg("furi", [["all", "All kanji"], ["above", "Above my level"], ["off", "Off"]])}</div>
       <div class="grp"><h3>Page direction</h3>${seg("dir", [["rtl", "Right-to-left"], ["ltr", "Left-to-right"]])}<p>Right-to-left is standard manga: tap or swipe from the left edge to go forward.</p></div>
       <div class="grp"><h3>Page turn</h3>${seg("turn", [["curl", "Curl"], ["slide", "Slide"], ["none", "None"]])}<p>Curl and Slide follow your finger like Apple Books: drag part-way to peek, let go to turn or flick to turn quickly. Tapping the side edges turns too.</p></div>
+      <div class="grp"><h3>Two pages</h3>${seg("spread", [["auto", "Open in landscape"], ["off", "Never"]])}${seg("coverAlone", [["on", "Cover on its own"], ["off", "Pair the cover"]])}<p>With the iPhone Duo open in landscape (or an iPad), Koma shows two pages like an open book and the left page turns over the spine. In portrait it shows one page. If facing pages look mismatched, switch "Pair the cover".</p></div>
+      <div class="grp"><h3>Phone closed</h3>${seg("outer", [["cover", "Show the cover"], ["read", "Keep reading"]])}<p>With the iPhone Duo closed, the outer screen shows only the cover of the book you're reading. Touch and hold the cover to read on the outer screen anyway.</p></div>
       <div class="grp"><h3>Volumes on this device</h3>
         ${vols.length ? vols.map(v => `<div class="vrow"><div style="flex:1"><div class="vg">${esc(v.title)}</div><div class="vr">${v.pageCount} pages · ${fmtBytes(v.bytes || 0)} · ${v.hasPack ? "readings" : "no readings"}</div></div><button class="dk danger" data-delvol="${esc(v.id)}">Remove</button></div>`).join("") : `<p>None yet.</p>`}
         <p>${persisted === true ? "Storage is protected from automatic clean-up." : "Keep Koma on your Home Screen so iOS doesn't clear its storage."}</p></div>
@@ -1645,6 +1971,7 @@ panel.addEventListener("click", async e => {
     const k = set.dataset.set, v = set.dataset.val;
     settings[k] = k === "level" ? +v : v; kvSet("settings", settings);
     openSettings(); if (!reader.hidden) { updateChrome(); if (st.sheet) renderSheet(); }
+    if (["spread", "coverAlone", "dir", "outer"].includes(k)) applyScreen();
     return;
   }
   const dv = e.target.closest("[data-delvol]");
@@ -1672,7 +1999,7 @@ document.addEventListener("click", e => {
 });
 
 /* ================= boot ================= */
-const APP_VERSION = "1.2.5";
+const APP_VERSION = "1.2.6";
 (async () => {
   settings = { ...DEF, ...(await kvGet("settings", {})) };
   st.vocab = await kvGet("vocab", []);
@@ -1680,6 +2007,7 @@ const APP_VERSION = "1.2.5";
   ol.src = await kvGet("olSrc", "library");
   try { if (navigator.storage && navigator.storage.persist) await navigator.storage.persist(); } catch {}
   renderLibrary();
+  applyScreen();                                         // closed phone: show the cover from the start
   repo = await kvGet("repo", null);
   if (repo && navigator.onLine) loadRepoIndex().then(() => scheduleLive());
 })();
