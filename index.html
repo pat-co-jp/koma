@@ -126,6 +126,9 @@ select.field option{color:#111;background:#fff}
 #closed .spine{position:absolute;top:0;bottom:0;right:0;width:7.5%;background:linear-gradient(to left,rgba(255,255,255,.16),rgba(0,0,0,.30) 26%,rgba(255,255,255,.12) 52%,rgba(0,0,0,.20) 78%,rgba(0,0,0,0))}
 #closed.ltr .spine{right:auto;left:0;transform:scaleX(-1)}
 #closed .sheen{position:absolute;inset:0;background:linear-gradient(118deg,rgba(255,255,255,.13),rgba(255,255,255,0) 38%,rgba(0,0,0,0) 62%,rgba(0,0,0,.14))}
+#closed .tip{position:absolute;left:50%;bottom:calc(env(safe-area-inset-bottom, 0px) + 22px);transform:translateX(-50%);width:max-content;max-width:86vw;padding:10px 16px;border-radius:14px;background:rgba(20,20,24,.86);color:#f3efe6;font:500 14px/1.35 system-ui;text-align:center;opacity:0;transition:opacity .25s ease;pointer-events:none}
+#closed.hinting .tip{opacity:1}
+#closed.opening .tip{opacity:0}
 #closed.opening::before{opacity:0;transition:opacity .6s ease-in}
 #closed.opening .book{transform:rotateY(100deg);opacity:.35;transition:transform .62s cubic-bezier(.4,0,.6,1),opacity .62s cubic-bezier(.8,0,1,1)}
 #closed.ltr.opening .book{transform:rotateY(-100deg)}
@@ -292,7 +295,7 @@ button,select,input,[data-vol],[data-olmanga]{touch-action:manipulation}
 </section>
 
 <section id="panel" hidden></section>
-<div id="closed" hidden aria-label="Book cover"><div class="book"><div class="edges"></div><div class="face"></div></div></div>
+<div id="closed" hidden aria-label="Book cover"><div class="book"><div class="edges"></div><div class="face"></div></div><div class="tip">Open the phone to read. Touch and hold to use Koma on this screen.</div></div>
 <div id="busy" hidden><div><div class="spin"></div><div id="busyTxt">Working…</div></div></div>
 <div id="toast"></div>
 <input id="file" type="file" multiple hidden>
@@ -543,6 +546,9 @@ async function deleteVolume(id) {
 /* ================= reader ================= */
 async function openVolume(id) {
   const vol = await get("volumes", id); if (!vol) return;
+  // 1.2.8: picked on the closed phone's outer screen: you're now holding this book, so its cover shows
+  // (before the pages do). Opening the phone opens it; touch and hold reads it here.
+  if (coverMode()) { peek = false; await setClosed(true, vol); }
   turnReset(); nbClear();
   const pk = await get("packs", id);
   st.vol = vol; st.pack = pk ? pk.pages : null; st.n = vol.pageCount;
@@ -642,10 +648,14 @@ function detectMode() {
 }
 const screenInfo = () => `Screen ${screen.width} × ${screen.height} pt · window ${innerWidth} × ${innerHeight} pt · ${screenMode === "cover" ? "phone closed" : screenMode === "spread" ? "two pages" : "one page"}`;
 const closedEl = $("#closed");
-async function paintClosed() {
-  let vol = st.vol && !reader.hidden ? st.vol : null;
+// The book on the cover: the volume given, else the one open in the reader, else the most recently read.
+// closedVol remembers it, so opening the phone opens that book (1.2.8).
+let closedVol = null;
+async function paintClosed(vol) {
+  vol = vol || (st.vol && !reader.hidden ? st.vol : null);
   if (!vol) { const vols = await all("volumes"); vol = vols.filter(v => v.lastReadAt).sort((a, b) => b.lastReadAt - a.lastReadAt)[0] || null; }
   const u = vol ? await coverUrl(vol) : "";
+  closedVol = vol ? vol.id : null;
   closedEl.classList.toggle("ltr", settings.dir === "ltr");
   closedEl.querySelector(".face").innerHTML = u
     ? `<img src="${u}" alt=""><i class="spine"></i><i class="sheen"></i>`
@@ -654,34 +664,73 @@ async function paintClosed() {
   if (im) try { await im.decode(); } catch {}
 }
 let closedSeq = 0;
-async function setClosed(on) {
-  const my = ++closedSeq;
+async function setClosed(on, vol) {
   if (on) {
+    const my = ++closedSeq;
     if (tn) turnLand();
     closeSheet();
     closedEl.classList.remove("opening");
-    if (closedEl.hidden) { await paintClosed(); if (my !== closedSeq) return; }
+    const want = vol || (st.vol && !reader.hidden ? st.vol : null);
+    if (closedEl.hidden || (want && want.id !== closedVol)) { await paintClosed(want); if (my !== closedSeq) return; }
     closedEl.hidden = false;
     return;
   }
-  if (closedEl.hidden) return;
+  if (closedEl.hidden) { ++closedSeq; return; }
+  if (closedEl.classList.contains("opening")) return;     // already swinging open
+  const my = ++closedSeq;
+  closedEl.classList.remove("hinting");
   if (reader.hidden || matchMedia("(prefers-reduced-motion: reduce)").matches) { closedEl.hidden = true; return; }
   closedEl.classList.add("opening");                      // the cover swings open on its spine
   setTimeout(() => { if (my === closedSeq) { closedEl.hidden = true; closedEl.classList.remove("opening"); } }, 640);
 }
-function applyScreen() {
-  const m = detectMode();
-  if (m !== "cover") peek = false;
-  screenMode = m;
-  setClosed(m === "cover" && settings.outer !== "read" && !peek);
-  refreshSpread();
-  const si = document.getElementById("scrInfo"); if (si) si.textContent = screenInfo();
+const coverMode = () => screenMode === "cover" && settings.outer !== "read";
+let scrBusy = false, scrAgain = false;
+async function applyScreen() {
+  if (scrBusy) { scrAgain = true; return; }               // one at a time: opening a book on unfold is async
+  scrBusy = true;
+  try {
+    const m = detectMode(), was = screenMode;
+    if (m !== "cover") peek = false;
+    screenMode = m;
+    const show = m === "cover" && settings.outer !== "read" && !peek;
+    // 1.2.8: the phone was opened on a closed book that isn't open in the reader yet (Koma was started on the
+    // outer screen, or closed while in the library): open that book, then let the cover swing open onto it.
+    if (was === "cover" && m !== "cover" && !closedEl.hidden && reader.hidden && panel.hidden && closedVol) {
+      try { await openVolume(closedVol); } catch (e) { console.warn(e); }
+    }
+    setClosed(show);
+    refreshSpread();
+    const si = document.getElementById("scrInfo"); if (si) si.textContent = screenInfo();
+  } finally {
+    scrBusy = false;
+    if (scrAgain) { scrAgain = false; applyScreen(); }
+  }
 }
-let rzq = 0;
-addEventListener("resize", () => { cancelAnimationFrame(rzq); rzq = requestAnimationFrame(applyScreen); });
-let holdT = 0;
-closedEl.addEventListener("pointerdown", () => { clearTimeout(holdT); holdT = setTimeout(() => { peek = true; applyScreen(); }, 650); });
-for (const t of ["pointerup", "pointercancel", "pointerleave"]) closedEl.addEventListener(t, () => clearTimeout(holdT));
+// 1.2.8: folding doesn't always arrive as a resize event in a Home Screen app, so several signals trigger a check,
+// and a light poll (four numbers, every 400 ms while visible) catches a size change that came with no event at all.
+let rzq = 0, lastGeo = "";
+const geo = () => `${innerWidth}x${innerHeight}|${screen.width}x${screen.height}`;
+const rescreen = () => { cancelAnimationFrame(rzq); rzq = requestAnimationFrame(() => { lastGeo = geo(); applyScreen(); }); };
+addEventListener("resize", rescreen);
+addEventListener("orientationchange", rescreen);
+addEventListener("pageshow", rescreen);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) { lastGeo = geo(); applyScreen(); } });
+if (window.visualViewport) visualViewport.addEventListener("resize", rescreen);
+setInterval(() => { if (document.hidden) return; const g = geo(); if (g !== lastGeo) { lastGeo = g; applyScreen(); } }, 400);
+// Touch and hold lifts the cover so Koma can be used on the outer screen (pick another volume: its cover then
+// shows; hold again to read here). A tap shows a short hint and nothing else.
+let holdT = 0, held = false, hintT = 0;
+closedEl.addEventListener("pointerdown", () => {
+  held = false; clearTimeout(holdT);
+  holdT = setTimeout(() => { held = true; peek = true; applyScreen(); }, 650);
+});
+closedEl.addEventListener("pointerup", () => {
+  clearTimeout(holdT);
+  if (held || closedEl.hidden || closedEl.classList.contains("opening")) return;
+  closedEl.classList.add("hinting"); clearTimeout(hintT);
+  hintT = setTimeout(() => closedEl.classList.remove("hinting"), 2600);
+});
+for (const t of ["pointercancel", "pointerleave"]) closedEl.addEventListener(t, () => clearTimeout(holdT));
 closedEl.addEventListener("contextmenu", e => e.preventDefault());
 
 let seq = 0, saveT;
@@ -1972,7 +2021,7 @@ async function openSettings() {
       <div class="grp"><h3>Page direction</h3>${seg("dir", [["rtl", "Right-to-left"], ["ltr", "Left-to-right"]])}<p>Right-to-left is standard manga: tap or swipe from the left edge to go forward.</p></div>
       <div class="grp"><h3>Page turn</h3>${seg("turn", [["curl", "Curl"], ["slide", "Slide"], ["none", "None"]])}<p>Curl and Slide follow your finger like Apple Books: drag part-way to peek, let go to turn or flick to turn quickly. Tapping the side edges turns too.</p></div>
       <div class="grp"><h3>Two pages</h3>${seg("spread", [["auto", "Open in landscape"], ["off", "Never"]])}${seg("coverAlone", [["on", "Cover on its own"], ["off", "Pair the cover"]])}<p>With the iPhone Duo open in landscape (or an iPad), Koma shows two pages like an open book and the left page turns over the spine. In portrait it shows one page. If facing pages look mismatched, switch "Pair the cover".</p></div>
-      <div class="grp"><h3>Phone closed</h3>${seg("outer", [["cover", "Show the cover"], ["read", "Keep reading"]])}<p>With the iPhone Duo closed, the outer screen shows only the cover of the book you're reading. Touch and hold the cover to read on the outer screen anyway.</p></div>
+      <div class="grp"><h3>Phone closed</h3>${seg("outer", [["cover", "Show the cover"], ["read", "Keep reading"]])}<p>With the iPhone Duo closed, the outer screen shows only the cover of your book, and opening the phone opens it. Touch and hold the cover to use Koma on the outer screen: pick another volume and its cover appears; hold again to read it there.</p></div>
       <div class="grp"><h3>Volumes on this device</h3>
         ${vols.length ? vols.map(v => `<div class="vrow"><div style="flex:1"><div class="vg">${esc(v.title)}</div><div class="vr">${v.pageCount} pages · ${fmtBytes(v.bytes || 0)} · ${v.hasPack ? "readings" : "no readings"}</div></div><button class="dk danger" data-delvol="${esc(v.id)}">Remove</button></div>`).join("") : `<p>None yet.</p>`}
         <p>${persisted === true ? "Storage is protected from automatic clean-up." : "Keep Koma on your Home Screen so iOS doesn't clear its storage."}</p></div>
@@ -2014,7 +2063,7 @@ document.addEventListener("click", e => {
 });
 
 /* ================= boot ================= */
-const APP_VERSION = "1.2.7";
+const APP_VERSION = "1.2.8";
 (async () => {
   settings = { ...DEF, ...(await kvGet("settings", {})) };
   st.vocab = await kvGet("vocab", []);
