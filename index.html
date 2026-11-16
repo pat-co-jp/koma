@@ -122,6 +122,11 @@ select.field option{color:#111;background:#fff}
 #closed .face{position:relative;overflow:hidden;border-radius:7px 3px 3px 7px;line-height:0;background:#1d1c22}
 #closed.ltr .face{border-radius:3px 7px 7px 3px}
 #closed .face img{display:block;max-width:82vw;max-height:84vh;pointer-events:none;-webkit-user-drag:none}
+/* Koma's own cover fills the outer screen edge to edge (1.2.11); volume covers keep their book shape */
+#closed.full .book{position:absolute;inset:0;filter:none}
+#closed.full .edges{display:none}
+#closed.full .face{width:100%;height:100%;border-radius:0}
+#closed.full .face img{width:100%;height:100%;max-width:none;max-height:none;object-fit:cover}
 #closed .blank{width:min(70vw,58vh);aspect-ratio:.7;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;line-height:1.1;background:linear-gradient(160deg,#2b2a31,#141317);color:#f3efe6}
 #closed .blank b{font:700 72px/1 "Hiragino Mincho ProN",serif;color:var(--gold)}
 #closed .blank span{font:600 20px/1 system-ui;letter-spacing:.3em;text-transform:uppercase;opacity:.75}
@@ -678,27 +683,34 @@ function scrInfoPaint() {
    the outer screen hands you that book, so its cover shows. Leaving the volume puts Koma's cover in your hands.
    Nothing opens the cover by itself (1.2.8 opened a book when it saw a passing size at launch). ---- */
 const closedEl = $("#closed");
-let coverUp = false, coverBook = "", komaCover = "";
+let coverUp = false, coverBook = "", komaCover = "", komaKey = "";
 const bookVol = () => (!reader.hidden && st.vol) ? st.vol : null;
 const coverMode = () => screenMode === "cover" && settings.outer !== "read";
-function komaCoverUrl() {                                  // Koma's cover, drawn once (also the curl's texture)
-  if (komaCover) return komaCover;
-  const c = document.createElement("canvas"); c.width = 700; c.height = 1000;
-  const x = c.getContext("2d");
-  const g = x.createLinearGradient(0, 0, 700, 1000); g.addColorStop(0, "#2f2e36"); g.addColorStop(1, "#121115");
-  x.fillStyle = g; x.fillRect(0, 0, 700, 1000);
-  x.strokeStyle = "rgba(242,193,78,.32)"; x.lineWidth = 3; x.strokeRect(48, 48, 604, 904);
+// Koma's cover, drawn at the screen's exact size so it fills the outer screen edge to edge (1.2.11); redrawn only
+// if that size changes. The same image is the curl's texture when the cover is turned.
+const komaSize = () => [Math.max(320, Math.round(closedEl.clientWidth || innerWidth)), Math.max(320, Math.round(closedEl.clientHeight || innerHeight))];
+function komaCoverUrl() {
+  const [W, H] = komaSize(), key = W + "x" + H;
+  if (komaCover && komaKey === key) return komaCover;
+  const k = 2, c = document.createElement("canvas"); c.width = W * k; c.height = H * k;
+  const x = c.getContext("2d"); x.scale(k, k);
+  const g = x.createLinearGradient(0, 0, W, H); g.addColorStop(0, "#2f2e36"); g.addColorStop(1, "#121115");
+  x.fillStyle = g; x.fillRect(0, 0, W, H);
+  const u = Math.min(W, H), m = u * 0.07;
+  x.strokeStyle = "rgba(242,193,78,.32)"; x.lineWidth = 1.5; x.strokeRect(m, m, W - 2 * m, H - 2 * m);
   x.textAlign = "center"; x.textBaseline = "middle";
-  x.fillStyle = "#f2c14e"; x.font = '700 230px "Hiragino Mincho ProN", "Yu Mincho", serif';
-  x.fillText("読", 350, 450);
-  x.fillStyle = "rgba(243,239,230,.78)"; x.font = '600 44px system-ui, -apple-system, "Segoe UI", sans-serif';
-  [..."KOMA"].forEach((ch, i) => x.fillText(ch, 350 + (i - 1.5) * 60, 680));
+  x.fillStyle = "#f2c14e"; x.font = `700 ${Math.round(u * 0.36)}px "Hiragino Mincho ProN", "Yu Mincho", serif`;
+  x.fillText("読", W / 2, H * 0.45);
+  x.fillStyle = "rgba(243,239,230,.78)"; x.font = `600 ${Math.round(u * 0.068)}px system-ui, -apple-system, "Segoe UI", sans-serif`;
+  [..."KOMA"].forEach((ch, i) => x.fillText(ch, W / 2 + (i - 1.5) * u * 0.092, H * 0.45 + u * 0.33));
+  komaKey = key;
   return (komaCover = c.toDataURL("image/png"));
 }
 async function paintClosed(vol) {
   const u = vol ? await coverUrl(vol) : komaCoverUrl();
   coverBook = vol ? vol.id : "koma";
   closedEl.dataset.book = coverBook;
+  closedEl.classList.toggle("full", !vol);
   closedEl.classList.toggle("ltr", settings.dir === "ltr");
   closedEl.querySelector(".face").innerHTML = `<img src="${u}" alt=""><i class="spine"></i><i class="sheen"></i>`;
   try { await closedEl.querySelector(".face img").decode(); } catch {}
@@ -717,17 +729,8 @@ async function coverShow(vol) {
   closedEl.hidden = false;
 }
 function coverHide() { ++closedSeq; coverUp = false; ctReset(); closedEl.classList.remove("opening", "hinting"); closedEl.hidden = true; }
-// The phone was opened with the cover up: it swings open on its spine onto the library or the pages.
-function coverSwing() {
-  coverUp = false;
-  if (closedEl.hidden || closedEl.classList.contains("opening")) return;
-  ctReset();
-  const my = ++closedSeq;
-  closedEl.classList.remove("hinting");
-  if (matchMedia("(prefers-reduced-motion: reduce)").matches) { closedEl.hidden = true; return; }
-  closedEl.classList.add("opening");
-  setTimeout(() => { if (my === closedSeq) { closedEl.hidden = true; closedEl.classList.remove("opening"); } }, 640);
-}
+// The phone was opened with the cover up: the inside is simply there. (1.2.9 swung the cover open on the inner screen;
+// removed in 1.2.11 at Patrick's request, as the physical unfold already is the motion.)
 
 // A fold only counts once the new shape has held for SETTLE ms: iOS can report a passing size while Koma is
 // launching or the phone is moving, and 1.2.8 reacted to one at launch. Rotations on the inner screen apply at once.
@@ -748,8 +751,11 @@ function applyScreen() {
     modeLog.push(`${new Date().toTimeString().slice(0, 8)} ${modeName(m)} ${innerWidth}×${innerHeight}`);
     if (modeLog.length > 5) modeLog.shift();
   }
-  if (coverMode()) { if (first || was !== "cover") coverShow(); }   // closed (or started closed): the cover
-  else if (!closedEl.hidden) coverSwing();                          // opened: it swings open
+  if (coverMode()) {                                                 // closed (or started closed): the cover
+    if (first || was !== "cover") coverShow();
+    else if (!closedEl.hidden && coverBook === "koma" && komaKey !== komaSize().join("x")) paintClosed(null);   // size changed
+  }
+  else if (!closedEl.hidden) coverHide();                           // opened: the inside, at once
   else coverUp = false;
   refreshSpread();
   scrInfoPaint();
@@ -2237,7 +2243,7 @@ document.addEventListener("click", e => {
 });
 
 /* ================= boot ================= */
-const APP_VERSION = "1.2.10";
+const APP_VERSION = "1.2.11";
 (async () => {
   settings = { ...DEF, ...(await kvGet("settings", {})) };
   st.vocab = await kvGet("vocab", []);
