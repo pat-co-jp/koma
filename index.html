@@ -202,6 +202,33 @@ textarea.copybox{width:100%;height:160px;background:var(--panel);color:var(--tex
 #busy div{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:20px 22px;min-width:240px;text-align:center}
 #busy .spin{width:30px;height:30px;border:3px solid rgba(255,255,255,.15);border-top-color:var(--accent);border-radius:50%;animation:sp .8s linear infinite;margin:0 auto 12px}
 @keyframes sp{to{transform:rotate(360deg)}}
+
+/* ---------- touch targets (1.2.4): every control owns at least 44 x 44 pt (Apple HIG) ---------- */
+/* Small pills keep their look and get an invisible hit area around them instead of growing. */
+button,select,input,[data-vol],[data-olmanga]{touch-action:manipulation}
+.ib{width:44px;height:44px}
+.ib svg{width:23px;height:23px}
+.lib-head{gap:4px;padding-right:calc(var(--sr) + 8px)}
+.tabs{gap:8px}
+.tabs button{min-height:44px;padding:10px 18px;font-size:15px}
+.dk{min-height:44px;padding:10px 16px;font-size:15px;justify-content:center}
+.seg button{min-height:44px;font-size:15px}
+.field{min-height:48px;font-size:16px}                  /* 16px also stops iOS zooming into fields */
+.rhead{gap:10px}
+.get{right:8px;bottom:8px;padding:8px 14px;font-size:13px;min-height:34px;display:flex;align-items:center}
+.get::after{content:"";position:absolute;inset:-7px -6px}
+.chrow{min-height:62px;padding:8px 0}
+.chb{position:relative;min-height:40px;min-width:100px;padding:10px 16px;font-size:14px}
+.chb::after{content:"";position:absolute;inset:-4px -4px}
+.mdesc{padding:4px 0}
+.pill{min-height:44px;padding:10px 16px;font-size:15px}
+.acts{gap:10px}
+.card .row{gap:10px}
+.sh-head .ib{width:44px;height:44px}
+#slider{height:44px}
+.bx::before{content:"";position:absolute;inset:-8px}       /* bubbles: 8 pt of grace around the box */
+.tk{padding:8px 1px}                                     /* words: taller hit area, same line spacing */
+#toast.act{padding:13px 18px}
 </style>
 </head>
 <body>
@@ -1405,7 +1432,7 @@ document.addEventListener("click", e => {
 });
 
 /* ================= boot ================= */
-const APP_VERSION = "1.2.3";
+const APP_VERSION = "1.2.4";
 (async () => {
   settings = { ...DEF, ...(await kvGet("settings", {})) };
   st.vocab = await kvGet("vocab", []);
