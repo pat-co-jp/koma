@@ -347,7 +347,7 @@ const kvGet = async (k, d) => { try { const r = await get("kv", k); return r ? r
 const kvSet = (k, v) => put("kv", { k, v });
 
 /* ================= state ================= */
-const DEF = { level: 3, furi: "above", dir: "rtl", boxes: true, turn: "curl", spread: "auto", coverAlone: "on", outer: "cover" };
+const DEF = { level: 3, furi: "above", dir: "rtl", boxes: true, turn: "curl", spread: "auto", coverAlone: "on", outer: "cover", outerGeo: null };
 let settings = { ...DEF };
 const st = {
   vol: null, pack: null, idx: 0, n: 0, url: null,
@@ -641,8 +641,21 @@ let screenMode = "single";
 // depends on exact sizes. The Duo's screens are nearly square (aspect ~1.42-1.45) where every other iPhone is
 // ~2.17, so a window narrower than 600 pt on a nearly square display (window or screen) is the closed phone.
 // Settings > About shows the measured sizes, the detected mode and the last few changes.
+// 1.2.10: on the Duo the outer screen's settled window still didn't match (Koma saw it only for a moment at launch),
+// so the outer screen can be taught: Settings › Phone closed › "This is the outer screen" saves its exact window and
+// screen size, and a window of that size is the closed phone from then on, whatever its shape.
+const outerGeoNow = () => {
+  const w = innerWidth, h = innerHeight;
+  return { s: Math.min(w, h), l: Math.max(w, h), ss: Math.min(screen.width, screen.height), sl: Math.max(screen.width, screen.height) };
+};
+function isTaughtOuter() {
+  const g = settings.outerGeo; if (!g) return false;
+  const c = outerGeoNow();
+  return Math.abs(c.s - g.s) <= 14 && Math.abs(c.l - g.l) <= 14 && Math.abs(c.ss - g.ss) <= 2 && Math.abs(c.sl - g.sl) <= 2;
+}
 function detectMode() {
   const w = innerWidth, h = innerHeight, s = Math.min(w, h), l = Math.max(w, h);
+  if (isTaughtOuter()) return "cover";
   const ss = Math.min(screen.width, screen.height) || s, sl = Math.max(screen.width, screen.height) || l;
   const squarish = l / s <= 1.62 || sl / ss <= 1.62;
   if (s < 600 && squarish) return "cover";
@@ -2171,7 +2184,10 @@ async function openSettings() {
       <div class="grp"><h3>Page direction</h3>${seg("dir", [["rtl", "Right-to-left"], ["ltr", "Left-to-right"]])}<p>Right-to-left is standard manga: tap or swipe from the left edge to go forward.</p></div>
       <div class="grp"><h3>Page turn</h3>${seg("turn", [["curl", "Curl"], ["slide", "Slide"], ["none", "None"]])}<p>Curl and Slide follow your finger like Apple Books: drag part-way to peek, let go to turn or flick to turn quickly. Tapping the side edges turns too.</p></div>
       <div class="grp"><h3>Two pages</h3>${seg("spread", [["auto", "Open in landscape"], ["off", "Never"]])}${seg("coverAlone", [["on", "Cover on its own"], ["off", "Pair the cover"]])}<p>With the iPhone Duo open in landscape (or an iPad), Koma shows two pages like an open book and the left page turns over the spine. In portrait it shows one page. If facing pages look mismatched, switch "Pair the cover".</p></div>
-      <div class="grp"><h3>Phone closed</h3>${seg("outer", [["cover", "Show the cover"], ["read", "Keep reading"]])}<p>With the iPhone Duo closed, the outer screen shows a cover until you open it: Koma's cover with the library inside, or the cover of the volume you have open. Turn the cover (swipe, or tap its edge) or open the phone to go in.</p></div>
+      <div class="grp"><h3>Phone closed</h3>${seg("outer", [["cover", "Show the cover"], ["read", "Keep reading"]])}<p>With the iPhone Duo closed, the outer screen shows a cover until you open it: Koma's cover with the library inside, or the cover of the volume you have open. Turn the cover (swipe, or tap its edge) or open the phone to go in.</p>
+        ${settings.outerGeo
+          ? `<p>Outer screen: ${settings.outerGeo.s} × ${settings.outerGeo.l} pt, set by you. <button class="dk" data-p="outer-forget">Forget</button></p>`
+          : `<p>If the cover doesn't stay on the outer screen, tap this there once: <button class="dk pri" data-p="outer-set">This is the outer screen</button></p>`}</div>
       <div class="grp"><h3>Volumes on this device</h3>
         ${vols.length ? vols.map(v => `<div class="vrow"><div style="flex:1"><div class="vg">${esc(v.title)}</div><div class="vr">${v.pageCount} pages · ${fmtBytes(v.bytes || 0)} · ${v.hasPack ? "readings" : "no readings"}</div></div><button class="dk danger" data-delvol="${esc(v.id)}">Remove</button></div>`).join("") : `<p>None yet.</p>`}
         <p>${persisted === true ? "Storage is protected from automatic clean-up." : "Keep Koma on your Home Screen so iOS doesn't clear its storage."}</p></div>
@@ -2199,6 +2215,13 @@ panel.addEventListener("click", async e => {
   const p = e.target.closest("[data-p]"); if (!p) return;
   if (p.dataset.p === "close") { panel.hidden = true; if (st.sheet) renderSheet(); }
   else if (p.dataset.p === "update") applyUpdate();
+  else if (p.dataset.p === "outer-set" || p.dataset.p === "outer-forget") {
+    const set = p.dataset.p === "outer-set";
+    settings.outerGeo = set ? outerGeoNow() : null; kvSet("settings", settings);
+    panel.hidden = true; if (st.sheet) renderSheet();
+    toast(set ? `Saved: this ${innerWidth} × ${innerHeight} pt screen is the outer screen.` : "Outer screen forgotten.");
+    applyScreen();                                       // the cover follows once the size has held for a moment
+  }
   else if (p.dataset.p === "copy") {
     const clean = s => String(s || "").replace(/[\t\n]/g, " ");
     const tsv = st.vocab.map(v => [v.b, v.r, v.g, v.ctx, v.tl].map(clean).join("\t")).join("\n");
@@ -2214,7 +2237,7 @@ document.addEventListener("click", e => {
 });
 
 /* ================= boot ================= */
-const APP_VERSION = "1.2.9";
+const APP_VERSION = "1.2.10";
 (async () => {
   settings = { ...DEF, ...(await kvGet("settings", {})) };
   st.vocab = await kvGet("vocab", []);
