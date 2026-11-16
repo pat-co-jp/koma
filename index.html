@@ -628,12 +628,19 @@ function refreshSpread() {               // after a rotation, a setting change o
    iPhone Duo closed = outer screen, 466 x 678 pt (aspect ~1.45): the cover of the book, nothing else.
    Open in landscape (~951 x 669 pt): two pages. Open in portrait, or any other portrait screen: one page. ---- */
 let screenMode = "single", peek = false;
+// 1.2.7: the outer screen's real window size didn't match Apple's published 466 x 678 pt, so the rule no longer
+// depends on exact sizes. The Duo's screens are nearly square (aspect ~1.42-1.45) where every other iPhone is
+// ~2.17, so a window narrower than 600 pt on a nearly square display (window or screen) is the closed phone.
+// Settings > About shows the measured sizes and the detected mode.
 function detectMode() {
   const w = innerWidth, h = innerHeight, s = Math.min(w, h), l = Math.max(w, h);
-  if (s <= 540 && l >= 560 && l / s <= 1.62) return "cover";
+  const ss = Math.min(screen.width, screen.height) || s, sl = Math.max(screen.width, screen.height) || l;
+  const squarish = l / s <= 1.62 || sl / ss <= 1.62;
+  if (s < 600 && squarish) return "cover";
   if (w > h && h >= 500 && w >= 800) return "spread";
   return "single";
 }
+const screenInfo = () => `Screen ${screen.width} × ${screen.height} pt · window ${innerWidth} × ${innerHeight} pt · ${screenMode === "cover" ? "phone closed" : screenMode === "spread" ? "two pages" : "one page"}`;
 const closedEl = $("#closed");
 async function paintClosed() {
   let vol = st.vol && !reader.hidden ? st.vol : null;
@@ -668,6 +675,7 @@ function applyScreen() {
   screenMode = m;
   setClosed(m === "cover" && settings.outer !== "read" && !peek);
   refreshSpread();
+  const si = document.getElementById("scrInfo"); if (si) si.textContent = screenInfo();
 }
 let rzq = 0;
 addEventListener("resize", () => { cancelAnimationFrame(rzq); rzq = requestAnimationFrame(applyScreen); });
@@ -1014,7 +1022,7 @@ function glRender() {
   // Spread: the leaf turns over the spine and lands on the far half, so the corner travels 2w, the roll
   // tightens to nothing as it lands, and the corner tracks the finger 1:1 (single page: half speed).
   const sRaw = t.released ? t.p : t.k * t.p;
-  const s = Math.max(0, Math.min(1, t.forward ? sRaw : 1 - sRaw));
+  const s = Math.max(0, Math.min(1, t.forward || t.spread ? sRaw : 1 - sRaw));   // spreads curl the grabbed page both ways
   const R0 = Math.max(16, Math.min(60, w * 0.11));
   const R = t.spread ? Math.max(0.5, R0 * (1 - s)) : R0 * (1 - 0.6 * s);
   const cy0 = Math.max(0, Math.min(h, t.fy0 - m.T));
@@ -1035,7 +1043,10 @@ function glRender() {
     if (dmax > 0) { P[0] += N[0] * dmax; P[1] += N[1] * dmax; }
   }
   const shadow = Math.min(1, s / 0.04) * (1 - Math.max(0, (s - 0.9) / 0.1));
-  glCurl.draw({ mirror: !t.ltr, P, N, R, dim: 0.22 * (1 - s), shadow });
+  // mirror = the leaf's spine is on its right. Single page and forward spread turns in RTL; a back turn in a spread
+  // grabs the page on the other side of the spine.
+  const mirror = t.spread && !t.forward ? t.ltr : !t.ltr;
+  glCurl.draw({ mirror, P, N, R, dim: 0.22 * (1 - s), shadow });
 }
 function turnBegin(forward, fy) {
   const tg = turnTarget(forward), target = tg.i, ltr = settings.dir === "ltr", spread = !!(st.spread && st.units);
@@ -1051,9 +1062,12 @@ function turnBegin(forward, fy) {
     if (es.length) Promise.all(es.map(e => e.p)).then(() => { if (tn === my) { turnBuild(); renderTurn(); } });
   }
 }
-// Spread turn: the leaf is the earlier spread's second page (left in RTL); it turns over the spine and
-// lands on the far half showing the later spread's first page, revealing that spread's second page
-// beneath. Going back plays the same turn in reverse. Wide pages and empty leaves slide instead.
+// Spread turn, like a real book: the page you grab is the leaf; its free corner curls under the finger, it turns
+// over the spine and lands on the far half showing the page printed on its back, revealing the page beneath.
+// Forward (RTL): the left page turns right; the later spread's right page is on its back.
+// Back (1.2.7): the right page turns left; the earlier spread's left page is on its back (until 1.2.6 a back turn
+// replayed the forward turn in reverse, so the right page never curled from its corner).
+// Wide pages and empty leaves slide instead.
 function turnBuildSpread() {
   const cu = st.unitOf[st.idx];
   const pg = i => {
@@ -1068,10 +1082,11 @@ function turnBuildSpread() {
   const tgtRs = slotRects(tn.tu, dimOf);
   const xr = tn.forward ? curRs : tgtRs, yr = tn.forward ? tgtRs : curRs;
   const slot = (rs, s) => rs.find(r => r.k === s) || null, im = r => r && pg(r.i) ? pg(r.i).img : null;
-  const leaf = slot(xr, 1), back = slot(yr, 0);
+  const fw = tn.forward;
+  const leaf = slot(curRs, fw ? 1 : 0), back = slot(tgtRs, fw ? 0 : 1);
   const flat = xr.some(r => r.k == null) || yr.some(r => r.k == null);
   if (tn.mode === "curl" && leaf && back && !flat && glCurl.init()) {
-    const under = slot(yr, 1), stat = slot(xr, 0);
+    const under = slot(tgtRs, fw ? 1 : 0), stat = slot(curRs, fw ? 0 : 1);
     tn.gl = true;
     glCurl.scene(im(leaf), leaf, im(under), under, { back: { im: im(back), r: back }, stat: stat ? { im: im(stat), r: stat } : null, spine: viewer.clientWidth / 2 });
     turnEl.appendChild(glCurl.canvas());
@@ -1961,7 +1976,7 @@ async function openSettings() {
       <div class="grp"><h3>Volumes on this device</h3>
         ${vols.length ? vols.map(v => `<div class="vrow"><div style="flex:1"><div class="vg">${esc(v.title)}</div><div class="vr">${v.pageCount} pages · ${fmtBytes(v.bytes || 0)} · ${v.hasPack ? "readings" : "no readings"}</div></div><button class="dk danger" data-delvol="${esc(v.id)}">Remove</button></div>`).join("") : `<p>None yet.</p>`}
         <p>${persisted === true ? "Storage is protected from automatic clean-up." : "Keep Koma on your Home Screen so iOS doesn't clear its storage."}</p></div>
-      <div class="grp"><h3>About</h3><p>Koma ${APP_VERSION}. Everything is stored on this device and works with no connection.</p>
+      <div class="grp"><h3>About</h3><p>Koma ${APP_VERSION}. Everything is stored on this device and works with no connection.</p><p id="scrInfo">${screenInfo()}</p>
         ${updateWorker ? `<p><button class="dk pri" data-p="update">Update now</button> A new version is downloaded and ready.</p>` : ""}</div>
     </div>`;
 }
@@ -1999,7 +2014,7 @@ document.addEventListener("click", e => {
 });
 
 /* ================= boot ================= */
-const APP_VERSION = "1.2.6";
+const APP_VERSION = "1.2.7";
 (async () => {
   settings = { ...DEF, ...(await kvGet("settings", {})) };
   st.vocab = await kvGet("vocab", []);
