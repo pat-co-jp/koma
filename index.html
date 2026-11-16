@@ -102,6 +102,22 @@ select.field option{color:#111;background:#fff}
 #stage.anim{transition:transform .22s ease}
 #pg{width:100%;height:100%;display:block;pointer-events:none;-webkit-user-drag:none;background:#fff}
 #overlay{position:absolute;inset:0}
+/* page turn (1.2.2): Books-style curl / slide that follows the finger */
+#turn{position:absolute;inset:0;z-index:2;pointer-events:none;perspective:2400px;overflow:hidden}
+#viewer.turning #stage{visibility:hidden}
+.tp{position:absolute;transform-style:preserve-3d;will-change:transform}
+.tp .f,.tp .b{position:absolute;inset:0;overflow:hidden;-webkit-backface-visibility:hidden;backface-visibility:hidden;background:#fff}
+#turn:not(.ready) .tp .f{background:transparent}
+.tp .b{transform:rotateY(180deg);background:#f3efe6}
+.tp img{width:100%;height:100%;display:block;-webkit-user-drag:none}
+.tp .b img{transform:scaleX(-1);opacity:.13}
+.tp .sh{position:absolute;inset:0}
+.tp .cast{position:absolute;top:0;bottom:0;width:60px;opacity:0}
+.tp.slide{box-shadow:0 0 24px rgba(0,0,0,.45)}
+.tp.flap{transform-origin:0 0}
+.tp.flap .pb{position:absolute;inset:0;background:#f3efe6}
+.tp.flap .pb img{opacity:.14}
+.tp .fs,.tp .es{position:absolute;top:0;bottom:0;pointer-events:none}
 .bx{position:absolute;border:1.5px solid rgba(224,83,58,.8);background:rgba(224,83,58,.07);border-radius:7px;min-width:24px;min-height:24px}
 .bx i{position:absolute;top:-8px;right:-8px;background:var(--accent);color:#fff;font:700 10px/17px system-ui;font-style:normal;min-width:17px;height:17px;border-radius:9px;text-align:center;padding:0 4px;pointer-events:none}
 .bx.on{border-color:var(--gold);background:rgba(242,193,78,.16);box-shadow:0 0 0 3px rgba(242,193,78,.35)}
@@ -204,7 +220,7 @@ textarea.copybox{width:100%;height:160px;background:var(--panel);color:var(--tex
 
 <!-- Reader -->
 <section id="reader" hidden>
-  <div id="viewer"><div id="stage"><img id="pg" alt=""><div id="overlay"></div></div></div>
+  <div id="viewer"><div id="stage"><img id="pg" alt=""><div id="overlay"></div></div><div id="turn" hidden></div></div>
   <header id="top" class="bar">
     <button class="ib" data-act="close-reader" aria-label="Library"><svg viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg></button>
     <div class="ttl"><b id="volName"></b><span id="volSub"></span></div>
@@ -269,7 +285,7 @@ const kvGet = async (k, d) => { try { const r = await get("kv", k); return r ? r
 const kvSet = (k, v) => put("kv", { k, v });
 
 /* ================= state ================= */
-const DEF = { level: 3, furi: "above", dir: "rtl", boxes: true };
+const DEF = { level: 3, furi: "above", dir: "rtl", boxes: true, turn: "curl" };
 let settings = { ...DEF };
 const st = {
   vol: null, pack: null, idx: 0, n: 0, url: null,
@@ -432,6 +448,7 @@ async function deleteVolume(id) {
 /* ================= reader ================= */
 async function openVolume(id) {
   const vol = await get("volumes", id); if (!vol) return;
+  turnReset(); nbClear();
   const pk = await get("packs", id);
   st.vol = vol; st.pack = pk ? pk.pages : null; st.n = vol.pageCount;
   reader.hidden = false; reader.classList.remove("hide-chrome"); $("#lib").hidden = true;
@@ -439,6 +456,7 @@ async function openVolume(id) {
   if (!st.pack) toast("No reading pack for this volume. Import its .koma.json to get help.");
 }
 function closeReader() {
+  turnReset(); nbClear();
   closeSheet(); reader.hidden = true; $("#lib").hidden = false;
   if (st.url) { URL.revokeObjectURL(st.url); st.url = null; }
   renderLibrary();
@@ -458,9 +476,205 @@ async function showPage(i) {
   st.z = { z: 1, tx: 0, ty: 0 }; st.shift = 0; layout(); renderOverlay(); updateChrome();
   clearTimeout(saveT);
   saveT = setTimeout(() => { st.vol.lastPage = i; st.vol.lastReadAt = Date.now(); put("volumes", st.vol); }, 800);
+  nbAround();
 }
-const fwd = () => st.idx < st.n - 1 ? showPage(st.idx + 1) : toast("Last page");
-const back = () => st.idx > 0 ? showPage(st.idx - 1) : toast("First page");
+const fwd = () => turnTo(true);
+const back = () => turnTo(false);
+
+/* ---- page turning (1.2.2): Books-style curl or slide, following the finger ---- */
+// Neighbouring pages are decoded ahead so a turn can start the instant the finger moves.
+const turnEl = $("#turn");
+const nb = new Map();                                   // page index -> { url, w, h, p }
+function nbClear() { for (const e of nb.values()) if (e.url) URL.revokeObjectURL(e.url); nb.clear(); }
+function nbLoad(i) {
+  if (!st.vol || i < 0 || i >= st.n) return null;
+  let e = nb.get(i);
+  if (e) return e;
+  e = { url: "", w: 0, h: 0 };
+  const vol = st.vol.id;
+  e.p = (async () => {
+    const pg = await get("pages", [vol, i]);
+    if (!pg || !st.vol || st.vol.id !== vol || nb.get(i) !== e) return e;
+    const u = URL.createObjectURL(pg.blob), im = new Image();
+    im.src = u;
+    try { await im.decode(); } catch {}
+    if (nb.get(i) !== e) { URL.revokeObjectURL(u); return e; }
+    e.url = u; e.w = im.naturalWidth; e.h = im.naturalHeight;
+    return e;
+  })();
+  nb.set(i, e);
+  return e;
+}
+function nbAround() {
+  if (tn) return;
+  for (const [i, e] of nb) if (Math.abs(i - st.idx) > 2) { if (e.url) URL.revokeObjectURL(e.url); nb.delete(i); }
+  nbLoad(st.idx + 1); nbLoad(st.idx - 1);
+}
+let tn = null;                                          // the turn in progress
+const turnMode = () => ["curl", "slide", "none"].includes(settings.turn) ? settings.turn : "curl";
+function fitRect(w, h) {
+  const vw = viewer.clientWidth, vh = viewer.clientHeight;
+  if (!w || !h) return { L: 0, T: 0, w: vw, h: vh };
+  const s = Math.min(vw / w, vh / h);
+  return { L: (vw - w * s) / 2, T: (vh - h * s) / 2, w: w * s, h: h * s };
+}
+function makePane(pg, back, extra) {
+  const r = fitRect(pg.w, pg.h), el = document.createElement("div");
+  const im = pg.url ? `<img src="${pg.url}" alt="">` : "";
+  el.className = "tp" + (extra ? " " + extra : "");
+  el.style.cssText = `left:${r.L}px;top:${r.T}px;width:${r.w}px;height:${r.h}px`;
+  el.innerHTML = `<div class="f">${im}<div class="sh"></div>${extra === "under" ? `<div class="cast"></div>` : ""}</div>` +
+    (back ? `<div class="b">${im}<div class="sh"></div></div>` : "");
+  el._r = r;
+  return el;
+}
+function turnBegin(forward) {
+  const target = st.idx + (forward ? 1 : -1), ltr = settings.dir === "ltr";
+  tn = { forward, target, ltr, mode: turnMode(), p: 0, raf: 0,
+         motion: forward !== ltr ? 1 : -1,            // +1: the page moves right on screen
+         edge: target < 0 || target >= st.n };
+  if (st.sheet) closeSheet();
+  turnBuild();
+  if (!tn.edge) {
+    const e = nbLoad(target), my = tn;
+    if (!e.url) e.p.then(() => { if (tn === my) { turnBuild(); renderTurn(); } });
+  }
+}
+function turnBuild() {
+  const cur = { url: st.url, w: img.naturalWidth, h: img.naturalHeight };
+  const e = tn.edge ? null : nb.get(tn.target);
+  const oth = e && e.url ? e : { url: "", w: cur.w, h: cur.h };
+  turnEl.innerHTML = ""; turnEl.classList.remove("ready");
+  if (tn.edge || tn.mode === "slide") {
+    tn.a = makePane(cur, false, "slide");
+    tn.b = tn.edge ? null : makePane(oth, false, "slide");
+    if (tn.b) turnEl.appendChild(tn.b);
+    turnEl.appendChild(tn.a);
+  } else {
+    // curl = a fold that follows the finger: the page bends over at a vertical fold line, the folded
+    // strip shows the back of the paper on top, and the next page shows through beside it.
+    // Going back is the same fold played in reverse with the previous page.
+    const mov = tn.forward ? cur : oth, und = tn.forward ? oth : cur;
+    tn.under = makePane(und, false, "under");
+    tn.mov = makePane(mov, false);
+    tn.mov.querySelector(".f").insertAdjacentHTML("beforeend", `<div class="es"></div>`);
+    tn.flap = makePane(mov, false, "flap");
+    tn.flap.querySelector(".f").innerHTML = `<div class="pb">${mov.url ? `<img src="${mov.url}" alt="">` : ""}</div><div class="fs"></div>`;
+    turnEl.append(tn.under, tn.mov, tn.flap);
+  }
+  turnEl.hidden = false;
+  const my = tn;
+  Promise.all([...turnEl.querySelectorAll("img")].map(i => i.decode().catch(() => {}))).then(() => {
+    if (tn !== my) return;
+    turnEl.classList.add("ready"); viewer.classList.add("turning");
+  });
+}
+function renderTurn() {
+  if (!tn) return;
+  const vw = viewer.clientWidth, { p, motion } = tn;
+  if (tn.edge) {                                         // nothing beyond: rubber band
+    tn.a.style.transform = `translate3d(${motion * 64 * (1 - Math.exp(-p * 3))}px,0,0)`;
+    return;
+  }
+  if (tn.mode === "slide") {
+    const x = motion * p * vw;
+    tn.a.style.transform = `translate3d(${x}px,0,0)`;
+    tn.b.style.transform = `translate3d(${x - motion * (vw + 14)}px,0,0)`;
+    return;
+  }
+  // curl: q = how far the moving page is turned (0 flat, 1 turned over). The fold line moves with the
+  // finger; the strip beyond it is mirrored over the page (back of the paper, ink faintly showing through).
+  const q = tn.forward ? p : 1 - p, ltr = tn.ltr, m = tn.mov._r, u = tn.under._r, w = m.w;
+  const xf = ltr ? w * (1 - q) : w * q;                    // fold line, in page coordinates
+  const strip = ltr ? w - xf : xf;                         // width of the folded-over strip
+  const k = Math.min(1, strip / 36) * Math.min(1, (1 - q) / 0.12);   // shadows ease in at the start, out at the end
+  tn.mov.style.clipPath = ltr ? `inset(0 ${w - xf}px 0 0)` : `inset(0 0 0 ${xf}px)`;
+  tn.flap.style.transform = `translateX(${2 * xf}px) scaleX(-1)`;
+  tn.flap.style.clipPath = ltr ? `inset(0 0 0 ${xf}px)` : `inset(0 ${w - xf}px 0 0)`;
+  const fs = tn.flap.querySelector(".fs");                 // paper bending at the fold: darker there
+  fs.style.left = (ltr ? xf : 0) + "px"; fs.style.width = strip + "px";
+  fs.style.background = `linear-gradient(to ${ltr ? "right" : "left"}, rgba(0,0,0,${(0.22 * k).toFixed(3)}), rgba(255,255,255,${(0.10 * k).toFixed(3)}) 18%, rgba(0,0,0,0) 55%, rgba(0,0,0,${(0.07 * k).toFixed(3)}))`;
+  const edge = ltr ? 2 * xf - w : 2 * xf;                  // the folded strip's free edge lies here
+  const es = tn.mov.querySelector(".es");                  // its shadow on the page it lies over
+  es.style.left = (ltr ? edge - 26 : edge) + "px"; es.style.width = "26px";
+  es.style.background = `linear-gradient(to ${ltr ? "left" : "right"}, rgba(0,0,0,${(0.30 * k).toFixed(3)}), rgba(0,0,0,0))`;
+  const cast = tn.under.querySelector(".cast"), fx = m.L + xf - u.L;   // shadow at the fold on the page below
+  cast.style.left = (ltr ? fx : fx - 60) + "px";
+  cast.style.background = `linear-gradient(to ${ltr ? "right" : "left"}, rgba(0,0,0,.34), rgba(0,0,0,0))`;
+  cast.style.opacity = k.toFixed(3);
+  tn.under.querySelector(".sh").style.background = `rgba(0,0,0,${(0.18 * (1 - q)).toFixed(3)})`;
+}
+function turnMove(dx) {
+  if (!tn) return;
+  tn.p = Math.max(0, Math.min(1, dx * tn.motion / viewer.clientWidth));
+  renderTurn();
+}
+function turnAnimate(to, speed) {
+  const my = tn;
+  return new Promise(res => {
+    if (!my) return res(false);
+    my.goal = to;
+    const from = my.p, dist = Math.abs(to - from) * viewer.clientWidth;
+    let dur = speed > 0.3 ? dist / (speed * 1.15) : 240 + 200 * Math.abs(to - from);
+    dur = Math.max(130, Math.min(dur, 430));
+    const t0 = performance.now();
+    const step = now => {
+      if (tn !== my) return res(false);
+      const k = Math.min(1, (now - t0) / dur), ease = 1 - Math.pow(1 - k, 3);
+      my.p = from + (to - from) * ease; renderTurn();
+      if (k < 1) my.raf = requestAnimationFrame(step); else res(true);
+    };
+    my.raf = requestAnimationFrame(step);
+  });
+}
+async function turnFinish(done) {
+  const my = tn; if (!my) return;
+  cancelAnimationFrame(my.raf);
+  if (done) { my.p = 1; renderTurn(); await showPage(my.target); }
+  if (tn === my) turnReset();
+  if (done) nbAround();
+}
+function turnReset() {
+  if (tn) cancelAnimationFrame(tn.raf);
+  tn = null; turnEl.hidden = true; turnEl.innerHTML = ""; turnEl.classList.remove("ready");
+  viewer.classList.remove("turning");
+}
+async function turnRelease(vx, cancel) {
+  const my = tn; if (!my) return;
+  const v = vx * my.motion;                              // px/ms in the direction of the turn
+  const done = !cancel && !my.edge && (v > 0.3 || (my.p > 0.4 && v > -0.15));
+  if (my.edge && my.p > 0.12) toast(my.forward ? "Last page" : "First page");
+  const ok = await turnAnimate(done ? 1 : 0, Math.abs(vx));
+  if (ok && tn === my) turnFinish(done);
+}
+async function turnTo(forward) {
+  const target = st.idx + (forward ? 1 : -1);
+  if (tn) {                                              // tapped again mid-turn: land the current one now
+    if (tn.drag) return;
+    await turnLand();
+    return turnTo(forward);
+  }
+  if (target < 0 || target >= st.n) { toast(forward ? "Last page" : "First page"); return; }
+  if (turnMode() === "none" || st.z.z > 1.001) return showPage(target);
+  turnBegin(forward);
+  const my = tn, e = nb.get(target);
+  if (e && !e.url) await Promise.race([e.p, new Promise(r => setTimeout(r, 400))]);   // turnBegin rebuilds when it lands
+  if (tn !== my) return;
+  const ok = await turnAnimate(1, 0);
+  if (ok && tn === my) turnFinish(true);
+}
+function turnLand() {                                    // jump an animating turn to where it was heading
+  const t = tn;
+  return t ? turnFinish(t.goal === 1 && !t.edge) : Promise.resolve();
+}
+function flickVx(hist) {
+  if (!hist || hist.length < 2) return 0;
+  const last = hist[hist.length - 1];
+  let first = hist[0];
+  for (const h of hist) if (last[1] - h[1] <= 100) { first = h; break; }
+  const dt = last[1] - first[1];
+  return dt > 0 ? (last[0] - first[0]) / dt : 0;
+}
 const curPage = () => st.pack ? st.pack[st.idx] : null;
 function updateChrome() {
   $("#volName").textContent = st.vol.title;
@@ -506,13 +720,15 @@ new ResizeObserver(() => { if (!reader.hidden) { layout(); if (st.sheet) keepBub
 /* gestures */
 const ptrs = new Map(); let pd = null, pinch = null, lastTap = 0, tapT = null;
 viewer.addEventListener("pointerdown", e => {
+  if (tn && !tn.drag) turnLand();                        // touching during a turn animation lands it
   ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
   if (ptrs.size === 2) {
     const [a, b] = [...ptrs.values()];
     pinch = { d0: Math.hypot(a.x - b.x, a.y - b.y) || 1, z0: st.z.z };
+    if (pd && pd.turning) { pd.turning = false; if (tn) tn.drag = false; turnRelease(0, true); }
     if (pd) pd.moved = true; return;
   }
-  pd = { x: e.clientX, y: e.clientY, tx: st.z.tx, ty: st.z.ty, moved: false, target: e.target };
+  pd = { x: e.clientX, y: e.clientY, tx: st.z.tx, ty: st.z.ty, moved: false, target: e.target, hist: [[e.clientX, e.timeStamp]] };
 });
 viewer.addEventListener("pointermove", e => {
   if (!ptrs.has(e.pointerId)) return;
@@ -523,8 +739,18 @@ viewer.addEventListener("pointermove", e => {
   }
   if (!pd) return;
   const dx = e.clientX - pd.x, dy = e.clientY - pd.y;
+  if (pd.turning) {
+    pd.hist.push([e.clientX, e.timeStamp]); if (pd.hist.length > 10) pd.hist.shift();
+    turnMove(dx); return;
+  }
   if (Math.abs(dx) + Math.abs(dy) > 10) pd.moved = true;
-  if (st.z.z > 1 && pd.moved) { st.z.tx = pd.tx + dx; st.z.ty = pd.ty + dy; clampZ(); applyZ(); }
+  if (st.z.z > 1 && pd.moved) { st.z.tx = pd.tx + dx; st.z.ty = pd.ty + dy; clampZ(); applyZ(); return; }
+  if (!tn && st.z.z <= 1.001 && turnMode() !== "none" && Math.abs(dx) > 8 && Math.abs(dx) > Math.abs(dy) * 1.2) {
+    pd.turning = true; pd.moved = true; clearTimeout(tapT); tapT = null;
+    turnBegin(settings.dir === "rtl" ? dx > 0 : dx < 0);
+    tn.drag = true; pd.hist = [[e.clientX, e.timeStamp]];
+    turnMove(dx);
+  }
 });
 function onUp(e) {
   if (!ptrs.has(e.pointerId)) return;
@@ -532,6 +758,12 @@ function onUp(e) {
   if (pinch) { if (ptrs.size < 2) { pinch = null; pd = null; if (st.z.z < 1.05) { st.z.z = 1; clampZ(); applyZ(); } } return; }
   if (!pd) return;
   const p = pd; pd = null;
+  if (p.turning) {
+    if (tn) tn.drag = false;
+    const cancel = e.type === "pointercancel";
+    turnRelease(cancel ? 0 : flickVx(p.hist.concat([[e.clientX, e.timeStamp]])), cancel);
+    return;
+  }
   if (e.type === "pointercancel") return;
   const dx = e.clientX - p.x, dy = e.clientY - p.y;
   if (p.moved) {
@@ -1125,6 +1357,7 @@ async function openSettings() {
       <div class="grp"><h3>Your level</h3>${seg("level", [[5, "N5"], [4, "N4"], [3, "N3"], [2, "N2"], [1, "N1"]])}<p>Decides which words get furigana when set to "Above my level".</p></div>
       <div class="grp"><h3>Furigana</h3>${seg("furi", [["all", "All kanji"], ["above", "Above my level"], ["off", "Off"]])}</div>
       <div class="grp"><h3>Page direction</h3>${seg("dir", [["rtl", "Right-to-left"], ["ltr", "Left-to-right"]])}<p>Right-to-left is standard manga: tap or swipe from the left edge to go forward.</p></div>
+      <div class="grp"><h3>Page turn</h3>${seg("turn", [["curl", "Curl"], ["slide", "Slide"], ["none", "None"]])}<p>Curl and Slide follow your finger like Apple Books: drag part-way to peek, let go to turn or flick to turn quickly. Tapping the side edges turns too.</p></div>
       <div class="grp"><h3>Volumes on this device</h3>
         ${vols.length ? vols.map(v => `<div class="vrow"><div style="flex:1"><div class="vg">${esc(v.title)}</div><div class="vr">${v.pageCount} pages · ${fmtBytes(v.bytes || 0)} · ${v.hasPack ? "readings" : "no readings"}</div></div><button class="dk danger" data-delvol="${esc(v.id)}">Remove</button></div>`).join("") : `<p>None yet.</p>`}
         <p>${persisted === true ? "Storage is protected from automatic clean-up." : "Keep Koma on your Home Screen so iOS doesn't clear its storage."}</p></div>
@@ -1163,7 +1396,7 @@ document.addEventListener("click", e => {
 });
 
 /* ================= boot ================= */
-const APP_VERSION = "1.2.1";
+const APP_VERSION = "1.2.2";
 (async () => {
   settings = { ...DEF, ...(await kvGet("settings", {})) };
   st.vocab = await kvGet("vocab", []);
