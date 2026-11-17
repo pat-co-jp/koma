@@ -29,6 +29,7 @@ button:disabled{opacity:.35;cursor:default}
 [hidden]{display:none!important}
 .ib{width:40px;height:40px;border-radius:12px;display:grid;place-items:center;flex:none}
 .ib:active{background:rgba(255,255,255,.08)}
+.ib.on{color:var(--gold)}
 .ib svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 
 /* ---------- library ---------- */
@@ -313,6 +314,7 @@ button,select,input,[data-vol],[data-olmanga]{touch-action:manipulation}
   <header id="top" class="bar">
     <button class="ib" data-act="close-reader" aria-label="Library"><svg viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg></button>
     <div class="ttl"><b id="volName"></b><span id="volSub"></span></div>
+    <button class="ib" data-act="shift" aria-label="Shift page pairs" hidden><svg viewBox="0 0 24 24"><path d="M4 8h15l-4-4M20 16H5l4 4"/></svg></button>
     <button class="ib" data-act="vocab" aria-label="Saved words"><svg viewBox="0 0 24 24"><path d="M6 3h12v18l-6-4-6 4z"/></svg></button>
     <button class="ib" data-act="settings" aria-label="Settings"><svg viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg></button>
   </header>
@@ -753,13 +755,36 @@ function buildUnits() {
   const n = st.n, u = [];
   let i = 0;
   if (settings.coverAlone !== "off" && n) { u.push([0]); i = 1; }
+  const solo = new Set(st.vol.singles || []);        // 1.2.18: pages set to stand alone (shift the pairs after them)
   while (i < n) {
-    if (isWide(i)) { u.push([i]); i++; continue; }
-    if (i + 1 < n && !isWide(i + 1)) { u.push([i, i + 1]); i += 2; } else { u.push([i]); i++; }
+    if (isWide(i) || solo.has(i)) { u.push([i]); i++; continue; }
+    if (i + 1 < n && !isWide(i + 1) && !solo.has(i + 1)) { u.push([i, i + 1]); i += 2; } else { u.push([i]); i++; }
   }
   st.units = u; st.unitOf = new Int32Array(n);
   u.forEach((x, k) => x.forEach(p => { st.unitOf[p] = k; }));
-  st.unitsKey = `${st.vol.id}|${n}|${settings.coverAlone}|${st.vol.dims ? 1 : 0}`;
+  st.unitsKey = unitsKeyNow();
+}
+const unitsKeyNow = () => `${st.vol.id}|${st.n}|${settings.coverAlone}|${st.vol.dims ? 1 : 0}|${(st.vol.singles || []).join(",")}`;
+// 1.2.18: a double-page illustration split across two spreads means the pairing is one page out from here on (a
+// scanlation can add or drop a page). The shift button (two pages only) makes the right-hand page of the current
+// spread stand alone, so every pair after it moves by one; on a page that stands alone it undoes that. Per volume.
+async function shiftPairs() {
+  if (!st.spread || !st.unit || !st.vol) return;
+  const i = st.unit[0], s = new Set(st.vol.singles || []);
+  if (st.unit.length === 2) s.add(i);
+  else if (s.has(i)) s.delete(i);
+  else {
+    toast(isWide(i) ? "This page is a full spread already."
+      : i === 0 && settings.coverAlone !== "off" ? "For the cover, use Settings › Two pages › Pair the cover."
+      : "Nothing to shift on a single page. Go to the spread where the pairing goes wrong.");
+    return;
+  }
+  st.vol.singles = [...s].sort((a, b) => a - b);
+  const cur = await get("volumes", st.vol.id);
+  if (cur) { cur.singles = st.vol.singles; await put("volumes", cur); }
+  turnReset(); buildUnits(); await showPage(i);
+  toast(s.has(i) ? `Page ${i + 1} now stands alone; the pages after it pair one later. Tap ⇄ again here to undo.`
+                 : `Page ${i + 1} pairs again.`);
 }
 // Where each page of spread k sits on screen. Slot 0 holds the lower page (right in RTL), slot 1 the higher.
 function slotRects(k, dimOf) {
@@ -781,7 +806,7 @@ function refreshSpread() {               // after a rotation, a setting change o
   if (reader.hidden || !st.vol) return;
   const sp = spreadOn();
   if (sp) {
-    const key = `${st.vol.id}|${st.n}|${settings.coverAlone}|${st.vol.dims ? 1 : 0}`;
+    const key = unitsKeyNow();
     if (!st.units || st.unitsKey !== key) { buildUnits(); if (st.spread) { turnReset(); return showPage(st.idx); } }
   }
   if (sp !== st.spread) { turnReset(); return showPage(st.idx); }
@@ -954,25 +979,15 @@ const geo = () => `${innerWidth}x${innerHeight}|${screen.width}x${screen.height}
 // 1.2.13: after a rotation or the keyboard, iOS could leave the page scrolled or the fixed reader at a stale height,
 // so the spread sat in a shorter box with a black band below it. The reader's height now follows the window and
 // any stray scroll is undone, checked with every screen signal and the poll.
-// 1.2.16: on Patrick's Duo the band came back with 1.2.13: iOS can report the stale, shorter height through innerHeight
-// and clientHeight alike (the band is the page's own background, so the web view itself is full size). When the
-// window's width is exactly one side of the screen, the screen's other side is the true height: use the larger.
+// 1.2.16-1.2.17 set the reader to the remembered full height. On the Duo that cropped the pages instead (laid out
+// 892 pt tall, only 783 visible): the band is outside what iOS lets the app draw. It's the known WebKit bug in Home
+// Screen apps (after the keyboard and/or a rotation the web view stays short until the app is relaunched).
+// 1.2.18: lay out to what iOS reports (never cropped), notice the shrink (the tallest height that held 1.2 s at this
+// width, remembered across launches), and try the known remedy: hide and re-show the page in one go, which makes
+// WebKit re-measure its viewport. Up to four tries; if it stays short, say how to clear it (relaunch).
 let fitFix = "";
-// Only in the Home Screen app (full-screen web view: black-translucent status bar, viewport-fit=cover); in a Safari
-// tab the toolbars make the window legitimately shorter than the screen.
 const standalone = () => navigator.standalone === true || (window.matchMedia && matchMedia("(display-mode: standalone)").matches);
-function screenH() {
-  const sw = screen.width, sh = screen.height, w = innerWidth;
-  if (!sw || !sh || !standalone()) return 0;
-  if (Math.abs(w - sw) <= 1) return sh;
-  if (Math.abs(w - sh) <= 1) return sw;
-  return 0;
-}
-// 1.2.17: on the Duo, `screen` reports the OUTER screen (466 × 678) even on the inner one, so screenH() never matched.
-// About showed the real case: two pages committed at 1267 × 891, later window 1267 × 783 (the 88% band). So Koma now
-// remembers the tallest height that has held for 1.2 s at each window width (kept across launches), and when iOS
-// later reports less at the same width, uses the remembered height. Home Screen app only, never while typing.
-let fitMem = {}, fitCand = null;
+let fitMem = {}, fitCand = null, stuck = null;
 try { fitMem = JSON.parse(localStorage.getItem("koma.fitH") || "{}") || {}; } catch {}
 function learnH(w, h) {
   const now = performance.now();
@@ -981,17 +996,35 @@ function learnH(w, h) {
   fitMem[w] = h;
   try { localStorage.setItem("koma.fitH", JSON.stringify(fitMem)); } catch {}
 }
+function fitLog(msg) { modeLog.push(`${new Date().toTimeString().slice(0, 8)} ${msg}`); if (modeLog.length > 5) modeLog.shift(); scrInfoPaint(); }
+function remeasure() {
+  window.__komaRemeasure = (window.__komaRemeasure || 0) + 1;
+  const sc = [...document.querySelectorAll(".lib-body, .p-body, #sheetBody")].map(e => [e, e.scrollTop]);
+  const bd = document.body;
+  bd.style.display = "none"; void bd.offsetHeight; bd.style.display = "";
+  sc.forEach(([e, t]) => { e.scrollTop = t; });
+}
+const STUCK_WAIT = [250, 700, 1500, 3000];
+function checkStuck(w, base) {
+  const was = fitMem[w] || 0, now = performance.now();
+  if (!(was > base + 8 && was < base * 1.6)) {
+    if (stuck) { if (base >= stuck.was - 8) fitLog(`viewport restored ${w}×${base}`); stuck = null; }
+    return;
+  }
+  if (!stuck || stuck.w !== w || stuck.base !== base) { stuck = { w, base, was, tries: 0, next: now, warned: false }; fitLog(`viewport short ${w}×${base} (was ${was})`); }
+  if (stuck.tries < STUCK_WAIT.length) {
+    if (now >= stuck.next) { stuck.next = now + STUCK_WAIT[stuck.tries]; stuck.tries++; remeasure(); }
+  } else if (!stuck.warned && now >= stuck.next) {
+    stuck.warned = true; fitLog("still short after 4 tries");
+    toast("iOS has shrunk Koma's screen (the dark band at the bottom). To clear it, swipe Koma away in the App Switcher and open it again.",
+          () => $("#toast").classList.remove("on"));
+  }
+}
 function fitApp() {
   const de = document.documentElement, base = Math.round(Math.max(innerHeight, de.clientHeight)), w = Math.round(innerWidth);
   const typing = editing(), sa = standalone();
-  if (sa && !typing) learnH(w, base);
-  const cand = Math.max(screenH(), sa ? (fitMem[w] || 0) : 0);
-  const h = !typing && cand > base + 8 && cand < base * 1.6 ? cand : base;
-  const fx = h !== base ? `${innerWidth}×${base} → ${h}` : "";
-  if (fx !== fitFix) {
-    fitFix = fx;
-    if (fx) { modeLog.push(`${new Date().toTimeString().slice(0, 8)} height fixed ${fx}`); if (modeLog.length > 5) modeLog.shift(); scrInfoPaint(); }
-  }
+  if (sa && !typing) { learnH(w, base); checkStuck(w, base); }
+  const h = base;
   if (!editing() && (scrollX || scrollY || (document.scrollingElement && document.scrollingElement.scrollTop))) {
     scrollTo(0, 0); if (document.scrollingElement) document.scrollingElement.scrollTop = 0;
   }
@@ -1723,6 +1756,8 @@ function updateChrome() {
   $("#volName").textContent = st.vol.title;
   $("#volSub").textContent = `${lab} / ${st.n}`;
   $("#pnum").textContent = `${lab} / ${st.n}`;
+  const sb = $("#top [data-act=shift]");
+  if (sb) { sb.hidden = !st.spread; sb.classList.toggle("on", !!(st.spread && (st.vol.singles || []).includes(u[0]))); }
   const nB = st.pack ? u.reduce((s, i) => s + (st.pack[i] && st.pack[i].bubbles ? st.pack[i].bubbles.length : 0), 0) : 0;
   const b = $("#boxBtn");
   b.hidden = !st.pack;
@@ -2483,11 +2518,11 @@ panel.addEventListener("click", async e => {
 /* ================= global actions ================= */
 document.addEventListener("click", e => {
   const a = e.target.closest("[data-act]"); if (!a) return;
-  ({ import: () => fileIn.click(), vocab: openVocab, settings: openSettings, "close-reader": closeReader })[a.dataset.act]?.();
+  ({ import: () => fileIn.click(), vocab: openVocab, settings: openSettings, "close-reader": closeReader, shift: shiftPairs })[a.dataset.act]?.();
 });
 
 /* ================= boot ================= */
-const APP_VERSION = "1.2.17";
+const APP_VERSION = "1.2.18";
 (async () => {
   settings = { ...DEF, ...(await kvGet("settings", {})) };
   st.vocab = await kvGet("vocab", []);
