@@ -735,10 +735,24 @@ function coverHide() { ++closedSeq; coverUp = false; ctReset(); closedEl.classLi
 // A fold only counts once the new shape has held for SETTLE ms: iOS can report a passing size while Koma is
 // launching or the phone is moving, and 1.2.8 reacted to one at launch. Rotations on the inner screen apply at once.
 const SETTLE = 450;
-let screenReady = false, pend = null, pendT = 0;
-function applyScreen() {
+let screenReady = false, pend = null, pendT = 0, lastW = 0, typingUntil = 0;
+// 1.2.12: the on-screen keyboard shortens the window (and its return restores the outer screen's size), which 1.2.11
+// read as "phone opened" then "phone closed", bringing the cover back after every search. Opening or closing the phone
+// changes the window's width; the keyboard changes only its height. So a change of width is required, and while a text
+// field is in use (and 1.5 s after) no fold is decided at all. Settings changes pass force = true.
+const EDITABLE = "input, textarea, select, [contenteditable]:not([contenteditable=false])";
+const editing = () => { const a = document.activeElement; return !!(a && a.matches && a.matches(EDITABLE)); };
+document.addEventListener("focusout", e => {
+  if (e.target && e.target.matches && e.target.matches(EDITABLE)) { typingUntil = performance.now() + 1500; setTimeout(applyScreen, 1530); }
+}, true);
+let settingsReady = false;                               // nothing is decided before the settings (taught size) are loaded
+function applyScreen(force) {
+  if (!settingsReady) return;
   const m = detectMode();
-  if (screenReady && m !== screenMode && (m === "cover" || screenMode === "cover")) {
+  if (screenReady && force !== true && m !== screenMode && (m === "cover" || screenMode === "cover")) {
+    if (Math.abs(innerWidth - lastW) <= 2 || editing() || performance.now() < typingUntil) {   // keyboard, not a fold
+      pend = null; clearTimeout(pendT); scrInfoPaint(); return;
+    }
     const now = performance.now();
     if (!pend || pend.m !== m) pend = { m, t: now };
     const left = SETTLE - (now - pend.t);
@@ -746,7 +760,7 @@ function applyScreen() {
   }
   pend = null; clearTimeout(pendT);
   const was = screenMode, first = !screenReady;
-  screenReady = true; screenMode = m;
+  screenReady = true; screenMode = m; lastW = innerWidth;
   if (first || m !== was) {
     modeLog.push(`${new Date().toTimeString().slice(0, 8)} ${modeName(m)} ${innerWidth}×${innerHeight}`);
     if (modeLog.length > 5) modeLog.shift();
@@ -2207,7 +2221,7 @@ panel.addEventListener("click", async e => {
     const k = set.dataset.set, v = set.dataset.val;
     settings[k] = k === "level" ? +v : v; kvSet("settings", settings);
     openSettings(); if (!reader.hidden) { updateChrome(); if (st.sheet) renderSheet(); }
-    if (["spread", "coverAlone", "dir", "outer"].includes(k)) applyScreen();
+    if (["spread", "coverAlone", "dir", "outer"].includes(k)) applyScreen(true);
     if (k === "outer") { if (coverMode()) coverShow(); else if (!closedEl.hidden) coverHide(); }
     return;
   }
@@ -2226,7 +2240,7 @@ panel.addEventListener("click", async e => {
     settings.outerGeo = set ? outerGeoNow() : null; kvSet("settings", settings);
     panel.hidden = true; if (st.sheet) renderSheet();
     toast(set ? `Saved: this ${innerWidth} × ${innerHeight} pt screen is the outer screen.` : "Outer screen forgotten.");
-    applyScreen();                                       // the cover follows once the size has held for a moment
+    applyScreen(true);                                   // a deliberate change: applies at once
   }
   else if (p.dataset.p === "copy") {
     const clean = s => String(s || "").replace(/[\t\n]/g, " ");
@@ -2243,7 +2257,7 @@ document.addEventListener("click", e => {
 });
 
 /* ================= boot ================= */
-const APP_VERSION = "1.2.11";
+const APP_VERSION = "1.2.12";
 (async () => {
   settings = { ...DEF, ...(await kvGet("settings", {})) };
   st.vocab = await kvGet("vocab", []);
@@ -2251,7 +2265,8 @@ const APP_VERSION = "1.2.11";
   ol.src = await kvGet("olSrc", "library");
   try { if (navigator.storage && navigator.storage.persist) await navigator.storage.persist(); } catch {}
   renderLibrary();
-  applyScreen();                                         // closed phone: show the cover from the start
+  settingsReady = true;
+  applyScreen(true);                                     // closed phone: show the cover from the start
   repo = await kvGet("repo", null);
   if (repo && navigator.onLine) loadRepoIndex().then(() => scheduleLive());
 })();
