@@ -376,7 +376,7 @@ const kvGet = async (k, d) => { try { const r = await get("kv", k); return r ? r
 const kvSet = (k, v) => put("kv", { k, v });
 
 /* ================= state ================= */
-const DEF = { level: 3, furi: "above", dir: "rtl", boxes: true, turn: "curl", spread: "auto", coverAlone: "on", outer: "cover", outerGeo: null, libSort: "recent", libFilter: "all", catSort: "added", catFilter: "all" };
+const DEF = { level: 3, furi: "above", dir: "rtl", boxes: true, turn: "curl", spread: "auto", coverAlone: "on", outer: "cover", outerGeo: null, libSort: "recent", libFilter: "all", catSort: "added", catFilter: "all", autoPair: "on" };
 let settings = { ...DEF };
 const st = {
   vol: null, pack: null, idx: 0, n: 0, url: null,
@@ -751,40 +751,145 @@ function ensureDims(vol) {               // page sizes from file headers, once p
   return job;
 }
 const isWide = i => { const d = st.vol && st.vol.dims && st.vol.dims[i]; return !!(d && d[0] && d[0] > d[1] * 1.05); };
-function buildUnits() {
-  const n = st.n, u = [];
+// Pairs pages into spreads: cover alone (setting), wide scans alone, pages in `solo` alone (1.2.18), the rest in twos.
+function unitsFor(n, wide, solo) {
+  const u = [];
   let i = 0;
   if (settings.coverAlone !== "off" && n) { u.push([0]); i = 1; }
-  const solo = new Set(st.vol.singles || []);        // 1.2.18: pages set to stand alone (shift the pairs after them)
   while (i < n) {
-    if (isWide(i) || solo.has(i)) { u.push([i]); i++; continue; }
-    if (i + 1 < n && !isWide(i + 1) && !solo.has(i + 1)) { u.push([i, i + 1]); i += 2; } else { u.push([i]); i++; }
+    if (wide(i) || solo.has(i)) { u.push([i]); i++; continue; }
+    if (i + 1 < n && !wide(i + 1) && !solo.has(i + 1)) { u.push([i, i + 1]); i += 2; } else { u.push([i]); i++; }
   }
+  return u;
+}
+const wideOf = vol => i => { const d = vol.dims && vol.dims[i]; return !!(d && d[0] && d[0] > d[1] * 1.05); };
+// 1.2.19: pages that must stand alone so each detected double-page illustration (seam j = pages j and j+1) lands in
+// one spread, given the manual shifts; seams are handled in reading order. `unsingles` = automatic shifts undone by hand.
+function autoSinglesFor(vol) {
+  if (settings.autoPair === "off" || !(vol.autoSeams || []).length) return [];
+  const n = vol.pageCount, wide = wideOf(vol), man = new Set(vol.singles || []), un = new Set(vol.unsingles || []), auto = [];
+  for (const j of vol.autoSeams) {
+    const uo = new Int32Array(n);
+    unitsFor(n, wide, new Set([...man, ...auto])).forEach((x, k) => x.forEach(p => { uo[p] = k; }));
+    if (j + 1 >= n || uo[j] === uo[j + 1]) continue;
+    if (j >= 1 && uo[j - 1] === uo[j] && !un.has(j - 1)) auto.push(j - 1);
+  }
+  return auto;
+}
+const soloOf = vol => new Set([...(vol.singles || []), ...autoSinglesFor(vol)]);
+function buildUnits() {
+  const n = st.n, u = unitsFor(n, isWide, soloOf(st.vol));
   st.units = u; st.unitOf = new Int32Array(n);
   u.forEach((x, k) => x.forEach(p => { st.unitOf[p] = k; }));
   st.unitsKey = unitsKeyNow();
 }
-const unitsKeyNow = () => `${st.vol.id}|${st.n}|${settings.coverAlone}|${st.vol.dims ? 1 : 0}|${(st.vol.singles || []).join(",")}`;
+const unitsKeyNow = () => [st.vol.id, st.n, settings.coverAlone, st.vol.dims ? 1 : 0, (st.vol.singles || []).join(","),
+  (st.vol.unsingles || []).join(","), settings.autoPair, (st.vol.autoSeams || []).join(",")].join("|");
+
+/* ---- matching double-page art automatically (1.2.19). Each page's two outermost strips (0.4% of its width, min
+   2 px; 160 samples tall) are read once per volume. Where two neighbouring pages would meet at the spine, the
+   profiles are compared: artwork that runs across the spine continues almost unchanged. A seam counts only if both
+   edges carry drawing (not margin, not flat colour), the profiles correlate ≥ 0.8 (best of ±3 samples) with a
+   mean difference under 20%, and it beats the seams either side by 0.25 (a page can join only one neighbour).
+   Tuned on Kagurabachi Ch.1 (54 pages): true seams scored 0.98, 0.89, 0.93; every other seam ≤ 0.6.
+   The manual ⇄ shift stays as the backup and wins over the automatic one. ---- */
+const AUTO_KEY = () => `2|${settings.dir === "ltr" ? "ltr" : "rtl"}`;
+const autoBusy = new Set();
+async function pageEdges(volId, i, x) {
+  const rec = await get("pages", [volId, i]); if (!rec) return null;
+  let bmp; try { bmp = await createImageBitmap(rec.blob); } catch { return null; }
+  const w = bmp.width, h = bmp.height, sw = Math.max(2, Math.round(w * 0.004)), N = 160;
+  if (x.canvas.width !== sw || x.canvas.height !== h) { x.canvas.width = sw; x.canvas.height = h; }
+  const col = sx => {                                // the strip at full resolution, area-averaged into N bands
+    x.clearRect(0, 0, sw, h); x.drawImage(bmp, sx, 0, sw, h, 0, 0, sw, h);
+    const d = x.getImageData(0, 0, sw, h).data, g = new Float32Array(N);
+    for (let k = 0; k < N; k++) {
+      const y0 = Math.floor(k * h / N), y1 = Math.max(y0 + 1, Math.floor((k + 1) * h / N));
+      let t = 0, c = 0;
+      for (let y = y0; y < y1; y++) for (let q = 0; q < sw; q++) { const o = (y * sw + q) * 4; t += 0.299 * d[o] + 0.587 * d[o + 1] + 0.114 * d[o + 2]; c++; }
+      g[k] = t / c;
+    }
+    return g;
+  };
+  const r = { L: col(0), R: col(w - sw) };
+  if (bmp.close) bmp.close();
+  return r;
+}
+function seamScore(a, b) {                         // a, b: the columns that would touch at the spine
+  if (!a || !b) return null;
+  const N = a.length, dark = g => g.reduce((n, v) => n + (v < 200), 0) / N;
+  const sd = g => { const m = g.reduce((t, v) => t + v, 0) / N; return Math.sqrt(g.reduce((t, v) => t + (v - m) * (v - m), 0) / N); };
+  if (dark(a) < 0.12 || dark(b) < 0.12 || sd(a) < 25 || sd(b) < 25) return null;   // margin or flat colour: no evidence
+  let best = -1;
+  for (let o = -3; o <= 3; o++) {
+    let k = 0, sa = 0, sb = 0, saa = 0, sbb = 0, sab = 0, d = 0;
+    for (let y = Math.max(0, -o); y < Math.min(N, N - o); y++) {
+      const x = a[y], z = b[y + o]; k++; sa += x; sb += z; saa += x * x; sbb += z * z; sab += x * z; d += Math.abs(x - z);
+    }
+    const va = saa - sa * sa / k, vb = sbb - sb * sb / k;
+    if (va <= 0 || vb <= 0) continue;
+    const r = (sab - sa * sb / k) / Math.sqrt(va * vb);
+    best = Math.max(best, d / k / 255 <= 0.2 ? r : Math.min(r, 0.5));
+  }
+  return best;
+}
+async function autoPairs(vol) {
+  if (settings.autoPair === "off" || vol.autoKey === AUTO_KEY() || autoBusy.has(vol.id)) return;
+  autoBusy.add(vol.id);
+  try {
+    const n = vol.pageCount, rtl = settings.dir !== "ltr", wide = wideOf(vol);
+    const c = document.createElement("canvas"); c.width = 2; c.height = 2;
+    const x = c.getContext("2d", { willReadFrequently: true }), E = [];
+    for (let i = 0; i < n; i++) {
+      E.push(await pageEdges(vol.id, i, x));
+      await new Promise(r => setTimeout(r, 0));
+      if (!st.vol || st.vol.id !== vol.id) return;              // volume closed: try again next time
+    }
+    const S = [];
+    for (let j = 0; j < n - 1; j++)
+      S.push(wide(j) || wide(j + 1) || !E[j] || !E[j + 1] ? null : rtl ? seamScore(E[j].L, E[j + 1].R) : seamScore(E[j].R, E[j + 1].L));
+    const seams = [];
+    for (let j = 0; j < n - 1; j++)
+      if (S[j] != null && S[j] >= 0.8 && [S[j - 1], S[j + 1]].every(v => v == null || S[j] - v >= 0.25)) seams.push(j);
+    vol.autoSeams = seams; vol.autoKey = AUTO_KEY(); window.__komaSeams = S;
+    const cur = await get("volumes", vol.id);
+    if (cur) { cur.autoSeams = seams; cur.autoKey = vol.autoKey; await put("volumes", cur); }
+    if (st.vol && st.vol.id === vol.id && st.spread) {
+      const before = st.unitsKey;
+      const apply = () => {
+        if (tn) { setTimeout(apply, 300); return; }               // never under a turn in progress
+        buildUnits();
+        if (st.unitsKey === before) return;
+        showPage(st.idx);
+        const ps = autoSinglesFor(vol).map(i => i + 1), k = ps.length;
+        if (k) toast(`Lined up double-page art: page${k === 1 ? "" : "s"} ${ps.join(", ")} now stand${k === 1 ? "s" : ""} alone so the illustrations after ${k === 1 ? "it" : "them"} share a spread. If a pair looks wrong, use ⇄.`);
+      };
+      apply();
+    }
+  } finally { autoBusy.delete(vol.id); }
+}
 // 1.2.18: a double-page illustration split across two spreads means the pairing is one page out from here on (a
 // scanlation can add or drop a page). The shift button (two pages only) makes the right-hand page of the current
 // spread stand alone, so every pair after it moves by one; on a page that stands alone it undoes that. Per volume.
 async function shiftPairs() {
   if (!st.spread || !st.unit || !st.vol) return;
-  const i = st.unit[0], s = new Set(st.vol.singles || []);
+  const i = st.unit[0], s = new Set(st.vol.singles || []), un = new Set(st.vol.unsingles || []);
+  let msg = "";
   if (st.unit.length === 2) s.add(i);
   else if (s.has(i)) s.delete(i);
+  else if (autoSinglesFor(st.vol).includes(i)) { un.add(i); msg = `Automatic pairing undone here: page ${i + 1} pairs again.`; }
   else {
     toast(isWide(i) ? "This page is a full spread already."
       : i === 0 && settings.coverAlone !== "off" ? "For the cover, use Settings › Two pages › Pair the cover."
       : "Nothing to shift on a single page. Go to the spread where the pairing goes wrong.");
     return;
   }
-  st.vol.singles = [...s].sort((a, b) => a - b);
+  st.vol.singles = [...s].sort((a, b) => a - b); st.vol.unsingles = [...un].sort((a, b) => a - b);
   const cur = await get("volumes", st.vol.id);
-  if (cur) { cur.singles = st.vol.singles; await put("volumes", cur); }
+  if (cur) { cur.singles = st.vol.singles; cur.unsingles = st.vol.unsingles; await put("volumes", cur); }
   turnReset(); buildUnits(); await showPage(i);
-  toast(s.has(i) ? `Page ${i + 1} now stands alone; the pages after it pair one later. Tap ⇄ again here to undo.`
-                 : `Page ${i + 1} pairs again.`);
+  toast(msg || (s.has(i) ? `Page ${i + 1} now stands alone; the pages after it pair one later. Tap ⇄ again here to undo.`
+                         : `Page ${i + 1} pairs again.`));
 }
 // Where each page of spread k sits on screen. Slot 0 holds the lower page (right in RTL), slot 1 the higher.
 function slotRects(k, dimOf) {
@@ -1179,6 +1284,7 @@ async function showPage(i) {
   if (!urls[1]) img2.removeAttribute("src");
   st.unit = unit; st.spread = spread;
   st.z = { z: 1, tx: 0, ty: 0 }; st.shift = 0; layout(); renderOverlay(); updateChrome();
+  if (spread) autoPairs(st.vol);
   clearTimeout(saveT);
   saveT = setTimeout(() => { st.vol.lastPage = i; st.vol.lastReadAt = Date.now(); put("volumes", st.vol); }, 800);
   nbAround();
@@ -1757,7 +1863,7 @@ function updateChrome() {
   $("#volSub").textContent = `${lab} / ${st.n}`;
   $("#pnum").textContent = `${lab} / ${st.n}`;
   const sb = $("#top [data-act=shift]");
-  if (sb) { sb.hidden = !st.spread; sb.classList.toggle("on", !!(st.spread && (st.vol.singles || []).includes(u[0]))); }
+  if (sb) { sb.hidden = !st.spread; sb.classList.toggle("on", !!(st.spread && u.length === 1 && soloOf(st.vol).has(u[0]))); }
   const nB = st.pack ? u.reduce((s, i) => s + (st.pack[i] && st.pack[i].bubbles ? st.pack[i].bubbles.length : 0), 0) : 0;
   const b = $("#boxBtn");
   b.hidden = !st.pack;
@@ -2468,7 +2574,7 @@ async function openSettings() {
       <div class="grp"><h3>Furigana</h3>${seg("furi", [["all", "All kanji"], ["above", "Above my level"], ["off", "Off"]])}</div>
       <div class="grp"><h3>Page direction</h3>${seg("dir", [["rtl", "Right-to-left"], ["ltr", "Left-to-right"]])}<p>Right-to-left is standard manga: tap or swipe from the left edge to go forward.</p></div>
       <div class="grp"><h3>Page turn</h3>${seg("turn", [["curl", "Curl"], ["slide", "Slide"], ["none", "None"]])}<p>Curl and Slide follow your finger like Apple Books: drag part-way to peek, let go to turn or flick to turn quickly. Tapping the side edges turns too.</p></div>
-      <div class="grp"><h3>Two pages</h3>${seg("spread", [["auto", "Open in landscape"], ["off", "Never"]])}${seg("coverAlone", [["on", "Cover on its own"], ["off", "Pair the cover"]])}<p>With the iPhone Duo open in landscape (or an iPad), Koma shows two pages like an open book and the left page turns over the spine. In portrait it shows one page. If facing pages look mismatched, switch "Pair the cover".</p></div>
+      <div class="grp"><h3>Two pages</h3>${seg("spread", [["auto", "Open in landscape"], ["off", "Never"]])}${seg("coverAlone", [["on", "Cover on its own"], ["off", "Pair the cover"]])}${seg("autoPair", [["on", "Match spreads automatically"], ["off", "Manual only"]])}<p>With the iPhone Duo open in landscape (or an iPad), Koma shows two pages like an open book and the left page turns over the spine. In portrait it shows one page. Koma looks for illustrations that run across two pages and pairs them. If a pair still looks wrong, tap ⇄ on that spread; for the cover, switch "Pair the cover".</p></div>
       <div class="grp"><h3>Phone closed</h3>${seg("outer", [["cover", "Show the cover"], ["read", "Keep reading"]])}<p>With the iPhone Duo closed, the outer screen shows a cover until you open it: Koma's cover with the library inside, or the cover of the volume you have open. Turn the cover (swipe, or tap its edge) or open the phone to go in.</p>
         ${settings.outerGeo
           ? `<p>Outer screen: ${settings.outerGeo.s} × ${settings.outerGeo.l} pt, set by you. <button class="dk" data-p="outer-forget">Forget</button></p>`
@@ -2486,7 +2592,7 @@ panel.addEventListener("click", async e => {
     const k = set.dataset.set, v = set.dataset.val;
     settings[k] = k === "level" ? +v : v; kvSet("settings", settings);
     openSettings(); if (!reader.hidden) { updateChrome(); if (st.sheet) renderSheet(); }
-    if (["spread", "coverAlone", "dir", "outer"].includes(k)) applyScreen(true);
+    if (["spread", "coverAlone", "dir", "outer", "autoPair"].includes(k)) applyScreen(true);
     if (k === "outer") { if (coverMode()) coverShow(); else if (!closedEl.hidden) coverHide(); }
     return;
   }
@@ -2522,7 +2628,7 @@ document.addEventListener("click", e => {
 });
 
 /* ================= boot ================= */
-const APP_VERSION = "1.2.18";
+const APP_VERSION = "1.2.19";
 (async () => {
   settings = { ...DEF, ...(await kvGet("settings", {})) };
   st.vocab = await kvGet("vocab", []);
