@@ -21,7 +21,7 @@
   --sl:env(safe-area-inset-left,0px);--sr:env(safe-area-inset-right,0px);
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-html,body{margin:0;height:100%;background:var(--ink);color:var(--text);overflow:hidden;overscroll-behavior:none;
+html,body{margin:0;height:var(--doc-h,100%);background:var(--ink);color:var(--text);overflow:hidden;overscroll-behavior:none;
   font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI","Hiragino Sans","Yu Gothic",sans-serif;-webkit-text-size-adjust:100%}
 button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 button:disabled{opacity:.35;cursor:default}
@@ -136,7 +136,7 @@ select.field option{color:#111;background:#fff}
 .tp.sp{background:var(--ink)}
 .tp.sp img{position:absolute;background:#fff}
 /* phone closed (1.2.6): the outer screen shows the book's cover, nothing else */
-#closed{position:fixed;inset:0;z-index:200;display:flex;align-items:center;justify-content:center;perspective:1800px;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
+#closed{position:fixed;left:0;right:0;top:0;height:var(--app-h,100%);z-index:200;display:flex;align-items:center;justify-content:center;perspective:1800px;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
 #closed[hidden]{display:none}
 #closed::before{content:"";position:absolute;inset:0;background:radial-gradient(120% 85% at 50% 38%,#232229,#09090b 72%);opacity:var(--bk,1)}
 #closed.turning:has(.glc) .book{visibility:hidden}
@@ -150,6 +150,8 @@ select.field option{color:#111;background:#fff}
 #closed .face img{display:block;max-width:82vw;max-height:84vh;pointer-events:none;-webkit-user-drag:none}
 /* Koma's own cover fills the outer screen edge to edge (1.2.11); volume covers keep their book shape */
 #closed.full .book{position:absolute;inset:0;filter:none}
+#closed.full.half .book{inset:0 50% 0 0}
+#closed.full.half.ltr .book{inset:0 0 0 50%}
 #closed.full .edges{display:none}
 #closed.full .face{width:100%;height:100%;border-radius:0}
 #closed.full .face img{width:100%;height:100%;max-width:none;max-height:none;object-fit:cover}
@@ -376,7 +378,7 @@ const kvGet = async (k, d) => { try { const r = await get("kv", k); return r ? r
 const kvSet = (k, v) => put("kv", { k, v });
 
 /* ================= state ================= */
-const DEF = { level: 3, furi: "above", dir: "rtl", boxes: true, turn: "curl", spread: "auto", coverAlone: "on", outer: "cover", outerGeo: null, libSort: "recent", libFilter: "all", catSort: "added", catFilter: "all", autoPair: "on" };
+const DEF = { level: 3, furi: "above", dir: "rtl", boxes: true, turn: "curl", spread: "auto", coverAlone: "on", outer: "cover", outerGeo: null, libSort: "recent", libFilter: "all", catSort: "added", catFilter: "all", autoPair: "on", fill: "auto" };
 let settings = { ...DEF };
 const st = {
   vol: null, pack: null, idx: 0, n: 0, url: null,
@@ -959,7 +961,7 @@ function detectMode() {
   return "single";
 }
 const modeName = m => m === "cover" ? "phone closed" : m === "spread" ? "two pages" : "one page";
-const screenInfo = () => `Screen ${screen.width} × ${screen.height} pt · window ${innerWidth} × ${innerHeight} pt · reader ${reader.clientWidth || "–"} × ${reader.clientHeight || "–"} pt · ${modeName(screenMode)}`;
+const screenInfo = () => `Screen ${screen.width} × ${screen.height} pt · window ${innerWidth} × ${innerHeight} pt · 100vh ${typeof fullVH === "function" ? fullVH() : "–"} pt · reader ${reader.clientWidth || "–"} × ${reader.clientHeight || "–"} pt · ${modeName(screenMode)}`;
 const modeLog = [];
 function scrInfoPaint() {
   const si = document.getElementById("scrInfo"); if (si) si.textContent = screenInfo();
@@ -979,7 +981,20 @@ const bookVol = () => (!reader.hidden && st.vol) ? st.vol : null;
 const coverMode = () => screenMode === "cover" && settings.outer !== "read";
 // Koma's cover, drawn at the screen's exact size so it fills the outer screen edge to edge (1.2.11); redrawn only
 // if that size changes. The same image is the curl's texture when the cover is turned.
-const komaSize = () => [Math.max(320, Math.round(closedEl.clientWidth || innerWidth)), Math.max(320, Math.round(closedEl.clientHeight || innerHeight))];
+const komaSize = () => [Math.max(320, Math.round((closedEl.clientWidth || innerWidth) / (closedEl.classList.contains("half") ? 2 : 1))),
+                        Math.max(320, Math.round(closedEl.clientHeight || innerHeight))];
+// 1.2.22 (Patrick): on a foldable (outer screen taught), opening Koma on the inner screen also starts on Koma's title
+// page, kept until you turn it (same curl). Portrait: the whole screen. Landscape (two pages): one page on the half
+// where a volume's cover sits in two-page view, like a closed book. A launch that passes through the outer screen's
+// size (iOS reports it for a moment while the app opens) keeps the title page instead of dropping it.
+let innerTitle = false;
+const LAUNCH = performance.now();
+const foldable = () => !!settings.outerGeo;
+function titleLayout() {
+  const half = screenMode === "spread";
+  if (closedEl.classList.contains("half") !== half) { closedEl.classList.toggle("half", half); return true; }
+  return false;
+}
 function komaCoverUrl() {
   const [W, H] = komaSize(), key = W + "x" + H;
   if (komaCover && komaKey === key) return komaCover;
@@ -1039,7 +1054,7 @@ async function coverShow(vol) {
   if (closedEl.hidden || (vol ? vol.id : "koma") !== coverBook) { await paintClosed(vol); if (my !== closedSeq) return; }
   closedEl.hidden = false;
 }
-function coverHide() { ++closedSeq; coverUp = false; ctReset(); closedEl.classList.remove("opening", "hinting"); closedEl.hidden = true; }
+function coverHide() { ++closedSeq; coverUp = false; innerTitle = false; closedEl.classList.remove("half"); ctReset(); closedEl.classList.remove("opening", "hinting"); closedEl.hidden = true; }
 // The phone was opened with the cover up: the inside is simply there. (1.2.9 swung the cover open on the inner screen;
 // removed in 1.2.11 at Patrick's request, as the physical unfold already is the motion.)
 
@@ -1076,12 +1091,20 @@ function applyScreen(force) {
     modeLog.push(`${new Date().toTimeString().slice(0, 8)} ${modeName(m)} ${innerWidth}×${innerHeight}`);
     if (modeLog.length > 5) modeLog.shift();
   }
+  if (coverMode() && innerTitle) { innerTitle = false; closedEl.classList.remove("half"); paintClosed(bookVol()); }
   if (coverMode()) {                                                 // closed (or started closed): the cover
     if (first || was !== "cover") coverShow();
     else if (!closedEl.hidden && closedEl.dataset.size !== komaSize().join("x")) {                   // size changed
       const v = bookVol();
       if (coverBook === "koma") paintClosed(null); else if (v && v.id === coverBook) paintClosed(v);
     }
+  }
+  else if (foldable() && !bookVol() && (first || (innerTitle && !closedEl.hidden)
+           || (was === "cover" && !closedEl.hidden && performance.now() - LAUNCH < 3000))) {
+    // the inner screen's title page: at launch, through a launch that passed the outer size, and across rotations
+    const fresh = !innerTitle || closedEl.hidden;
+    innerTitle = true;
+    if (titleLayout() || fresh || closedEl.dataset.size !== komaSize().join("x")) { coverUp = true; paintClosed(null); closedEl.hidden = false; }
   }
   else if (!closedEl.hidden) coverHide();                           // opened: the inside, at once
   else coverUp = false;
@@ -1136,11 +1159,29 @@ function checkStuck(w, base) {
           () => $("#toast").classList.remove("on"));
   }
 }
+// 1.2.22: Patrick's Duo, fresh launch in portrait: window 892 × 1159 on a 892 × 1267 screen (108 pt short, as in
+// landscape 1267 × 783 vs 891). This matches iOS 26's "phantom toolbar" space in Home Screen web apps: the window
+// (innerHeight, the layout viewport) is short while the web view itself covers the whole screen, and `100vh` still
+// measures the whole screen (WebKit bug 237961: in standalone with viewport-fit=cover only 100vh fills it). 1.2.17
+// enlarged only the reader, but html/body stayed at the short window, so the page was clipped at the window's bottom
+// edge. Now, in the Home Screen app, when 100vh is taller than the window, html and body take the 100vh height as
+// well (the document itself becomes full screen), and the reader, library, settings and cover follow it.
+// Settings › About › Fill the screen: Automatic / Off.
+const vhProbe = document.createElement("div");
+vhProbe.style.cssText = "position:absolute;left:0;top:0;width:1px;height:100vh;visibility:hidden;pointer-events:none";
+document.body.appendChild(vhProbe);
+const fullVH = () => Math.round(vhProbe.getBoundingClientRect().height);
+let fillNote = "";
 function fitApp() {
   const de = document.documentElement, base = Math.round(Math.max(innerHeight, de.clientHeight)), w = Math.round(innerWidth);
-  const typing = editing(), sa = standalone();
-  if (sa && !typing) { learnH(w, base); checkStuck(w, base); }
-  const h = base;
+  const typing = editing(), sa = standalone(), vh = fullVH();
+  const fill = sa && !typing && settings.fill !== "off" && vh > base + 8 && vh < base * 1.6;
+  if (sa && !typing) { learnH(w, Math.max(base, fill ? vh : 0)); if (!fill) checkStuck(w, base); else stuck = null; }
+  const h = fill ? vh : base;
+  const note = fill ? `filled ${w}×${base} → ${vh} (100vh)` : "";
+  if (note !== fillNote) { fillNote = note; if (note) fitLog(note); }
+  const dh = fill ? h + "px" : "";
+  if (de.style.getPropertyValue("--doc-h") !== dh) { if (dh) de.style.setProperty("--doc-h", dh); else de.style.removeProperty("--doc-h"); }
   if (!editing() && (scrollX || scrollY || (document.scrollingElement && document.scrollingElement.scrollTop))) {
     scrollTo(0, 0); if (document.scrollingElement) document.scrollingElement.scrollTop = 0;
   }
@@ -1216,7 +1257,7 @@ function ctReset() {
   const b = closedEl.querySelector(".book"); b.style.transform = ""; b.style.opacity = "";
   coverCurl.clear();
 }
-function ctOpened() { ++closedSeq; coverUp = false; closedEl.hidden = true; ctReset(); }   // inside the book now
+function ctOpened() { ++closedSeq; coverUp = false; innerTitle = false; closedEl.classList.remove("half"); closedEl.hidden = true; ctReset(); }   // inside the book now
 async function ctRelease(vx, cancel) {
   const my = ct; if (!my) return;
   const v = vx * my.motion;
@@ -2593,6 +2634,7 @@ async function openSettings() {
       <div class="grp"><h3>Volumes on this device</h3>
         ${vols.length ? vols.map(v => `<div class="vrow"><div style="flex:1"><div class="vg">${esc(v.title)}</div><div class="vr">${v.pageCount} pages · ${fmtBytes(v.bytes || 0)} · ${v.hasPack ? "readings" : "no readings"}</div></div><button class="dk danger" data-delvol="${esc(v.id)}">Remove</button></div>`).join("") : `<p>None yet.</p>`}
         <p>${persisted === true ? "Storage is protected from automatic clean-up." : "Keep Koma on your Home Screen so iOS doesn't clear its storage."}</p></div>
+      <div class="grp"><h3>Screen</h3>${seg("fill", [["auto", "Fill the screen"], ["off", "Use the window"]])}<p>In the Home Screen app, iOS sometimes reports a window shorter than the screen and leaves a dark band at the bottom. "Fill the screen" lays Koma out to the full screen height instead. If pages ever look cut off at the bottom, choose "Use the window" and tell Claude.</p></div>
       <div class="grp"><h3>About</h3><p>Koma ${APP_VERSION}. Everything is stored on this device and works with no connection.</p><p id="scrInfo">${screenInfo()}</p><p id="scrLog">${modeLog.length ? "Recent: " + esc(modeLog.join(" · ")) : ""}</p>
         ${updateWorker ? `<p><button class="dk pri" data-p="update">Update now</button> A new version is downloaded and ready.</p>` : ""}</div>
     </div>`;
@@ -2604,6 +2646,7 @@ panel.addEventListener("click", async e => {
     settings[k] = k === "level" ? +v : v; kvSet("settings", settings);
     openSettings(); if (!reader.hidden) { updateChrome(); if (st.sheet) renderSheet(); }
     if (["spread", "coverAlone", "dir", "outer", "autoPair"].includes(k)) applyScreen(true);
+    if (k === "fill") fitApp();
     if (k === "outer") { if (coverMode()) coverShow(); else if (!closedEl.hidden) coverHide(); }
     return;
   }
@@ -2639,7 +2682,7 @@ document.addEventListener("click", e => {
 });
 
 /* ================= boot ================= */
-const APP_VERSION = "1.2.21";
+const APP_VERSION = "1.2.22";
 (async () => {
   settings = { ...DEF, ...(await kvGet("settings", {})) };
   st.vocab = await kvGet("vocab", []);
