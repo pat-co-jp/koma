@@ -763,28 +763,27 @@ function unitsFor(n, wide, solo) {
   return u;
 }
 const wideOf = vol => i => { const d = vol.dims && vol.dims[i]; return !!(d && d[0] && d[0] > d[1] * 1.05); };
-// 1.2.19: pages that must stand alone so each detected double-page illustration (seam j = pages j and j+1) lands in
-// one spread, given the manual shifts; seams are handled in reading order. `unsingles` = automatic shifts undone by hand.
-function autoSinglesFor(vol) {
-  if (settings.autoPair === "off" || !(vol.autoSeams || []).length) return [];
-  const n = vol.pageCount, wide = wideOf(vol), man = new Set(vol.singles || []), un = new Set(vol.unsingles || []), auto = [];
-  for (const j of vol.autoSeams) {
-    const uo = new Int32Array(n);
-    unitsFor(n, wide, new Set([...man, ...auto])).forEach((x, k) => x.forEach(p => { uo[p] = k; }));
-    if (j + 1 >= n || uo[j] === uo[j + 1]) continue;
-    if (j >= 1 && uo[j - 1] === uo[j] && !un.has(j - 1)) auto.push(j - 1);
-  }
-  return auto;
-}
-const soloOf = vol => new Set([...(vol.singles || []), ...autoSinglesFor(vol)]);
+// 1.2.20 (Patrick): a shift moves the WHOLE chapter's pairing by one page, so there is never a lone page in the middle
+// of a chapter: the first page after the cover (or the first page, with "Pair the cover") stands alone and every pair
+// after it moves by one. Per volume: `vol.pairShift` (set with ⇄, wins) else the automatic choice `vol.autoShift`.
+// (1.2.18-1.2.19's mid-chapter `singles`/`unsingles` are no longer used.)
+const shiftOn = vol => vol.pairShift != null ? !!vol.pairShift : settings.autoPair !== "off" && !!vol.autoShift;
+const shiftPage = () => settings.coverAlone !== "off" ? 1 : 0;
+const soloOf = vol => new Set(shiftOn(vol) && vol.pageCount > shiftPage() + 1 ? [shiftPage()] : []);
 function buildUnits() {
   const n = st.n, u = unitsFor(n, isWide, soloOf(st.vol));
   st.units = u; st.unitOf = new Int32Array(n);
   u.forEach((x, k) => x.forEach(p => { st.unitOf[p] = k; }));
   st.unitsKey = unitsKeyNow();
 }
-const unitsKeyNow = () => [st.vol.id, st.n, settings.coverAlone, st.vol.dims ? 1 : 0, (st.vol.singles || []).join(","),
-  (st.vol.unsingles || []).join(","), settings.autoPair, (st.vol.autoSeams || []).join(",")].join("|");
+const unitsKeyNow = () => [st.vol.id, st.n, settings.coverAlone, st.vol.dims ? 1 : 0, settings.autoPair,
+  String(st.vol.pairShift), String(!!st.vol.autoShift)].join("|");
+// How many detected seams each choice keeps inside one spread.
+function seamsJoined(vol, shifted) {
+  const n = vol.pageCount, uo = new Int32Array(n), sp = shiftPage();
+  unitsFor(n, wideOf(vol), new Set(shifted && n > sp + 1 ? [sp] : [])).forEach((x, k) => x.forEach(p => { uo[p] = k; }));
+  return (vol.autoSeams || []).filter(j => j + 1 < n && uo[j] === uo[j + 1]).length;
+}
 
 /* ---- matching double-page art automatically (1.2.19). Each page's two outermost strips (0.4% of its width, min
    2 px; 160 samples tall) are read once per volume. Where two neighbouring pages would meet at the spine, the
@@ -793,7 +792,7 @@ const unitsKeyNow = () => [st.vol.id, st.n, settings.coverAlone, st.vol.dims ? 1
    mean difference under 20%, and it beats the seams either side by 0.25 (a page can join only one neighbour).
    Tuned on Kagurabachi Ch.1 (54 pages): true seams scored 0.98, 0.89, 0.93; every other seam ≤ 0.6.
    The manual ⇄ shift stays as the backup and wins over the automatic one. ---- */
-const AUTO_KEY = () => `2|${settings.dir === "ltr" ? "ltr" : "rtl"}`;
+const AUTO_KEY = () => `3|${settings.dir === "ltr" ? "ltr" : "rtl"}|${settings.coverAlone}`;
 const autoBusy = new Set();
 async function pageEdges(volId, i, x) {
   const rec = await get("pages", [volId, i]); if (!rec) return null;
@@ -852,8 +851,11 @@ async function autoPairs(vol) {
     for (let j = 0; j < n - 1; j++)
       if (S[j] != null && S[j] >= 0.8 && [S[j - 1], S[j + 1]].every(v => v == null || S[j] - v >= 0.25)) seams.push(j);
     vol.autoSeams = seams; vol.autoKey = AUTO_KEY(); window.__komaSeams = S;
+    const j0 = seamsJoined(vol, false), j1 = seamsJoined(vol, true);
+    vol.autoShift = j1 > j0;                               // shift only when it lines up more double-page art
+    window.__komaJoined = [j0, j1];
     const cur = await get("volumes", vol.id);
-    if (cur) { cur.autoSeams = seams; cur.autoKey = vol.autoKey; await put("volumes", cur); }
+    if (cur) { cur.autoSeams = seams; cur.autoKey = vol.autoKey; cur.autoShift = vol.autoShift; await put("volumes", cur); }
     if (st.vol && st.vol.id === vol.id && st.spread) {
       const before = st.unitsKey;
       const apply = () => {
@@ -861,35 +863,23 @@ async function autoPairs(vol) {
         buildUnits();
         if (st.unitsKey === before) return;
         showPage(st.idx);
-        const ps = autoSinglesFor(vol).map(i => i + 1), k = ps.length;
-        if (k) toast(`Lined up double-page art: page${k === 1 ? "" : "s"} ${ps.join(", ")} now stand${k === 1 ? "s" : ""} alone so the illustrations after ${k === 1 ? "it" : "them"} share a spread. If a pair looks wrong, use ⇄.`);
+        if (shiftOn(vol)) toast(`Shifted this chapter's pages by one so its double-page art lines up (page ${shiftPage() + 1} now on its own). Tap ⇄ to undo.`);
       };
       apply();
     }
   } finally { autoBusy.delete(vol.id); }
 }
-// 1.2.18: a double-page illustration split across two spreads means the pairing is one page out from here on (a
-// scanlation can add or drop a page). The shift button (two pages only) makes the right-hand page of the current
-// spread stand alone, so every pair after it moves by one; on a page that stands alone it undoes that. Per volume.
+// ⇄ (two-page view): shift the whole chapter's pairing by one page, or back. Keeps the page you're on in view.
 async function shiftPairs() {
   if (!st.spread || !st.unit || !st.vol) return;
-  const i = st.unit[0], s = new Set(st.vol.singles || []), un = new Set(st.vol.unsingles || []);
-  let msg = "";
-  if (st.unit.length === 2) s.add(i);
-  else if (s.has(i)) s.delete(i);
-  else if (autoSinglesFor(st.vol).includes(i)) { un.add(i); msg = `Automatic pairing undone here: page ${i + 1} pairs again.`; }
-  else {
-    toast(isWide(i) ? "This page is a full spread already."
-      : i === 0 && settings.coverAlone !== "off" ? "For the cover, use Settings › Two pages › Pair the cover."
-      : "Nothing to shift on a single page. Go to the spread where the pairing goes wrong.");
-    return;
-  }
-  st.vol.singles = [...s].sort((a, b) => a - b); st.vol.unsingles = [...un].sort((a, b) => a - b);
+  if (st.n <= shiftPage() + 2) { toast("This volume is too short to re-pair."); return; }
+  const keep = st.unit[0], on = !shiftOn(st.vol);
+  st.vol.pairShift = on;
   const cur = await get("volumes", st.vol.id);
-  if (cur) { cur.singles = st.vol.singles; cur.unsingles = st.vol.unsingles; await put("volumes", cur); }
-  turnReset(); buildUnits(); await showPage(i);
-  toast(msg || (s.has(i) ? `Page ${i + 1} now stands alone; the pages after it pair one later. Tap ⇄ again here to undo.`
-                         : `Page ${i + 1} pairs again.`));
+  if (cur) { cur.pairShift = on; await put("volumes", cur); }
+  turnReset(); buildUnits(); await showPage(keep);
+  toast(on ? `Pages shifted by one for this chapter: page ${shiftPage() + 1} is now on its own and every pair after it moves along. Tap ⇄ again to undo.`
+           : "Pairing back to normal for this chapter.");
 }
 // Where each page of spread k sits on screen. Slot 0 holds the lower page (right in RTL), slot 1 the higher.
 function slotRects(k, dimOf) {
@@ -1863,7 +1853,7 @@ function updateChrome() {
   $("#volSub").textContent = `${lab} / ${st.n}`;
   $("#pnum").textContent = `${lab} / ${st.n}`;
   const sb = $("#top [data-act=shift]");
-  if (sb) { sb.hidden = !st.spread; sb.classList.toggle("on", !!(st.spread && u.length === 1 && soloOf(st.vol).has(u[0]))); }
+  if (sb) { sb.hidden = !st.spread; sb.classList.toggle("on", !!(st.spread && shiftOn(st.vol))); }
   const nB = st.pack ? u.reduce((s, i) => s + (st.pack[i] && st.pack[i].bubbles ? st.pack[i].bubbles.length : 0), 0) : 0;
   const b = $("#boxBtn");
   b.hidden = !st.pack;
@@ -2574,7 +2564,7 @@ async function openSettings() {
       <div class="grp"><h3>Furigana</h3>${seg("furi", [["all", "All kanji"], ["above", "Above my level"], ["off", "Off"]])}</div>
       <div class="grp"><h3>Page direction</h3>${seg("dir", [["rtl", "Right-to-left"], ["ltr", "Left-to-right"]])}<p>Right-to-left is standard manga: tap or swipe from the left edge to go forward.</p></div>
       <div class="grp"><h3>Page turn</h3>${seg("turn", [["curl", "Curl"], ["slide", "Slide"], ["none", "None"]])}<p>Curl and Slide follow your finger like Apple Books: drag part-way to peek, let go to turn or flick to turn quickly. Tapping the side edges turns too.</p></div>
-      <div class="grp"><h3>Two pages</h3>${seg("spread", [["auto", "Open in landscape"], ["off", "Never"]])}${seg("coverAlone", [["on", "Cover on its own"], ["off", "Pair the cover"]])}${seg("autoPair", [["on", "Match spreads automatically"], ["off", "Manual only"]])}<p>With the iPhone Duo open in landscape (or an iPad), Koma shows two pages like an open book and the left page turns over the spine. In portrait it shows one page. Koma looks for illustrations that run across two pages and pairs them. If a pair still looks wrong, tap ⇄ on that spread; for the cover, switch "Pair the cover".</p></div>
+      <div class="grp"><h3>Two pages</h3>${seg("spread", [["auto", "Open in landscape"], ["off", "Never"]])}${seg("coverAlone", [["on", "Cover on its own"], ["off", "Pair the cover"]])}${seg("autoPair", [["on", "Match spreads automatically"], ["off", "Manual only"]])}<p>With the iPhone Duo open in landscape (or an iPad), Koma shows two pages like an open book and the left page turns over the spine. In portrait it shows one page. Koma looks for illustrations that run across two pages and, if they'd be split, shifts the whole chapter's pairing by one page. If pairs still look wrong, tap ⇄ to shift (or unshift) the chapter; for the cover, switch "Pair the cover".</p></div>
       <div class="grp"><h3>Phone closed</h3>${seg("outer", [["cover", "Show the cover"], ["read", "Keep reading"]])}<p>With the iPhone Duo closed, the outer screen shows a cover until you open it: Koma's cover with the library inside, or the cover of the volume you have open. Turn the cover (swipe, or tap its edge) or open the phone to go in.</p>
         ${settings.outerGeo
           ? `<p>Outer screen: ${settings.outerGeo.s} × ${settings.outerGeo.l} pt, set by you. <button class="dk" data-p="outer-forget">Forget</button></p>`
@@ -2628,7 +2618,7 @@ document.addEventListener("click", e => {
 });
 
 /* ================= boot ================= */
-const APP_VERSION = "1.2.19";
+const APP_VERSION = "1.2.20";
 (async () => {
   settings = { ...DEF, ...(await kvGet("settings", {})) };
   st.vocab = await kvGet("vocab", []);
