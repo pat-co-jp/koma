@@ -703,11 +703,31 @@ function komaCoverUrl() {
   komaKey = key;
   return (komaCover = c.toDataURL("image/png"));
 }
+// 1.2.14: a volume's cover fills the outer screen too (Patrick, 17 Nov): the first page is drawn at the screen's
+// exact size × 2, scaled to cover and centred (a manga cover is close to the outer screen's shape, so only a thin
+// strip is trimmed). Drawn, not CSS-cropped, so the page curl's texture matches what's on screen. Cached per size.
+let volCover = "", volKey = "";
+async function volCoverUrl(vol) {
+  const [W, H] = komaSize(), key = vol.id + "|" + W + "x" + H;
+  if (volCover && volKey === key) return volCover;
+  const src = await coverUrl(vol);
+  if (!src) return komaCoverUrl();
+  const im = new Image(); im.src = src;
+  try { await im.decode(); } catch { return src; }
+  const k = 2, c = document.createElement("canvas"); c.width = W * k; c.height = H * k;
+  const x = c.getContext("2d"); x.scale(k, k);
+  const s = Math.max(W / im.naturalWidth, H / im.naturalHeight), w = im.naturalWidth * s, h = im.naturalHeight * s;
+  x.fillStyle = "#fff"; x.fillRect(0, 0, W, H);
+  x.imageSmoothingQuality = "high"; x.drawImage(im, (W - w) / 2, (H - h) / 2, w, h);
+  volKey = key;
+  return (volCover = c.toDataURL("image/jpeg", 0.92));
+}
 async function paintClosed(vol) {
-  const u = vol ? await coverUrl(vol) : komaCoverUrl();
+  const u = vol ? await volCoverUrl(vol) : komaCoverUrl();
   coverBook = vol ? vol.id : "koma";
   closedEl.dataset.book = coverBook;
-  closedEl.classList.toggle("full", !vol);
+  closedEl.dataset.size = komaSize().join("x");
+  closedEl.classList.add("full");
   closedEl.classList.toggle("ltr", settings.dir === "ltr");
   closedEl.querySelector(".face").innerHTML = `<img src="${u}" alt=""><i class="spine"></i><i class="sheen"></i>`;
   try { await closedEl.querySelector(".face img").decode(); } catch {}
@@ -764,7 +784,10 @@ function applyScreen(force) {
   }
   if (coverMode()) {                                                 // closed (or started closed): the cover
     if (first || was !== "cover") coverShow();
-    else if (!closedEl.hidden && coverBook === "koma" && komaKey !== komaSize().join("x")) paintClosed(null);   // size changed
+    else if (!closedEl.hidden && closedEl.dataset.size !== komaSize().join("x")) {                   // size changed
+      const v = bookVol();
+      if (coverBook === "koma") paintClosed(null); else if (v && v.id === coverBook) paintClosed(v);
+    }
   }
   else if (!closedEl.hidden) coverHide();                           // opened: the inside, at once
   else coverUp = false;
@@ -2265,7 +2288,7 @@ document.addEventListener("click", e => {
 });
 
 /* ================= boot ================= */
-const APP_VERSION = "1.2.13";
+const APP_VERSION = "1.2.14";
 (async () => {
   settings = { ...DEF, ...(await kvGet("settings", {})) };
   st.vocab = await kvGet("vocab", []);

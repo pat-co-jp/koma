@@ -1,6 +1,6 @@
 /* Koma service worker: caches the app shell so the reader opens with no connection.
    Bump VERSION on every release; the page offers a reload when a new version is ready. */
-const VERSION = "koma-v1.2.13";
+const VERSION = "koma-v1.2.14";
 const SHELL = [
   "./",
   "./index.html",
