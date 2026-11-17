@@ -237,7 +237,7 @@ rt{font-size:.42em;color:#7a7364;font-family:"Hiragino Sans","Yu Gothic",sans-se
 .note{border-left:3px solid #4f8a5b;font-size:14px;line-height:1.5}
 
 /* ---------- panels, toast, progress ---------- */
-#panel{position:fixed;z-index:40;inset:0;background:var(--ink);display:flex;flex-direction:column}
+#panel{position:fixed;z-index:40;left:0;right:0;top:0;height:var(--app-h,100%);background:var(--ink);display:flex;flex-direction:column}
 .p-head{display:flex;align-items:center;gap:8px;padding:calc(var(--st) + 8px) calc(var(--sr) + 12px) 8px calc(var(--sl) + 16px);border-bottom:1px solid var(--line)}
 .p-head h2{flex:1;margin:0;font-size:17px}
 .p-body{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:14px calc(var(--sr) + 16px) calc(var(--sb) + 24px) calc(var(--sl) + 16px)}
@@ -968,9 +968,25 @@ function screenH() {
   if (Math.abs(w - sh) <= 1) return sw;
   return 0;
 }
+// 1.2.17: on the Duo, `screen` reports the OUTER screen (466 × 678) even on the inner one, so screenH() never matched.
+// About showed the real case: two pages committed at 1267 × 891, later window 1267 × 783 (the 88% band). So Koma now
+// remembers the tallest height that has held for 1.2 s at each window width (kept across launches), and when iOS
+// later reports less at the same width, uses the remembered height. Home Screen app only, never while typing.
+let fitMem = {}, fitCand = null;
+try { fitMem = JSON.parse(localStorage.getItem("koma.fitH") || "{}") || {}; } catch {}
+function learnH(w, h) {
+  const now = performance.now();
+  if (!fitCand || fitCand.w !== w || fitCand.h !== h) { fitCand = { w, h, t: now }; return; }
+  if (now - fitCand.t < 1200 || fitMem[w] >= h) return;
+  fitMem[w] = h;
+  try { localStorage.setItem("koma.fitH", JSON.stringify(fitMem)); } catch {}
+}
 function fitApp() {
-  const de = document.documentElement, base = Math.round(Math.max(innerHeight, de.clientHeight)), sH = screenH();
-  const h = !editing() && sH > base + 8 && sH < base * 1.6 ? sH : base;
+  const de = document.documentElement, base = Math.round(Math.max(innerHeight, de.clientHeight)), w = Math.round(innerWidth);
+  const typing = editing(), sa = standalone();
+  if (sa && !typing) learnH(w, base);
+  const cand = Math.max(screenH(), sa ? (fitMem[w] || 0) : 0);
+  const h = !typing && cand > base + 8 && cand < base * 1.6 ? cand : base;
   const fx = h !== base ? `${innerWidth}×${base} → ${h}` : "";
   if (fx !== fitFix) {
     fitFix = fx;
@@ -2471,7 +2487,7 @@ document.addEventListener("click", e => {
 });
 
 /* ================= boot ================= */
-const APP_VERSION = "1.2.16";
+const APP_VERSION = "1.2.17";
 (async () => {
   settings = { ...DEF, ...(await kvGet("settings", {})) };
   st.vocab = await kvGet("vocab", []);
