@@ -96,7 +96,7 @@ select.field option{color:#111;background:#fff}
 .p-head h2{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
 /* ---------- reader ---------- */
-#reader{position:fixed;inset:0;z-index:20;background:var(--ink)}
+#reader{position:fixed;left:0;right:0;top:0;height:var(--app-h,100%);z-index:20;background:var(--ink)}
 #viewer{position:absolute;inset:0;touch-action:none;user-select:none;-webkit-user-select:none;overflow:hidden}
 #stage{position:absolute;left:0;top:0;transform-origin:0 0;will-change:transform}
 #stage.anim{transition:transform .22s ease}
@@ -169,8 +169,7 @@ select.field option{color:#111;background:#fff}
 .ttl{flex:1;min-width:0;text-align:center}
 .ttl b{display:block;font-weight:600;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .ttl span{font-size:12px;color:var(--mute)}
-#slider{flex:1;accent-color:var(--accent);height:28px}
-#pnum{font-size:12px;color:var(--mute);min-width:64px;text-align:right;font-variant-numeric:tabular-nums}
+#pnum{margin-left:auto;font-size:12px;color:var(--mute);min-width:64px;text-align:right;font-variant-numeric:tabular-nums}
 #boxBtn{position:absolute;z-index:6;right:calc(var(--sr) + 16px);bottom:calc(var(--sb) + 14px);width:58px;height:58px;border-radius:50%;
   background:#2b2b31;color:var(--gold);border:1.5px solid var(--gold);box-shadow:0 6px 20px rgba(0,0,0,.45);display:grid;place-items:center;
   font:700 24px/1 "Hiragino Mincho ProN","Yu Mincho",serif}
@@ -264,7 +263,6 @@ button,select,input,[data-vol],[data-olmanga]{touch-action:manipulation}
 .acts{gap:10px}
 .card .row{gap:10px}
 .sh-head .ib{width:44px;height:44px}
-#slider{height:44px}
 .bx::before{content:"";position:absolute;inset:-8px}       /* bubbles: 8 pt of grace around the box */
 .tk{padding:8px 1px}                                     /* words: taller hit area, same line spacing */
 #toast.act{padding:13px 18px}
@@ -294,7 +292,6 @@ button,select,input,[data-vol],[data-olmanga]{touch-action:manipulation}
     <button class="ib" data-act="settings" aria-label="Settings"><svg viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg></button>
   </header>
   <footer id="bottom" class="bar">
-    <input id="slider" type="range" min="1" max="1" value="1" aria-label="Page">
     <div id="pnum"></div>
   </footer>
   <button id="boxBtn" aria-label="Show or hide boxes">読</button>
@@ -362,7 +359,7 @@ const st = {
 };
 const viewer = $("#viewer"), stage = $("#stage"), img = $("#pg"), overlay = $("#overlay");
 const img2 = $("#pg2"), overlay2 = $("#overlay2"), pws = [$("#pw0"), $("#pw1")], gutterEl = $("#gutter");
-const sheet = $("#sheet"), sheetBody = $("#sheetBody"), panel = $("#panel"), reader = $("#reader"), slider = $("#slider");
+const sheet = $("#sheet"), sheetBody = $("#sheetBody"), panel = $("#panel"), reader = $("#reader");
 const fileIn = $("#file");
 const canSpeak = "speechSynthesis" in window && typeof SpeechSynthesisUtterance !== "undefined";
 
@@ -668,7 +665,7 @@ function detectMode() {
   return "single";
 }
 const modeName = m => m === "cover" ? "phone closed" : m === "spread" ? "two pages" : "one page";
-const screenInfo = () => `Screen ${screen.width} × ${screen.height} pt · window ${innerWidth} × ${innerHeight} pt · ${modeName(screenMode)}`;
+const screenInfo = () => `Screen ${screen.width} × ${screen.height} pt · window ${innerWidth} × ${innerHeight} pt · reader ${reader.clientWidth || "–"} × ${reader.clientHeight || "–"} pt · ${modeName(screenMode)}`;
 const modeLog = [];
 function scrInfoPaint() {
   const si = document.getElementById("scrInfo"); if (si) si.textContent = screenInfo();
@@ -778,13 +775,24 @@ function applyScreen(force) {
 // and a light poll (four numbers, every 400 ms while visible) catches a size change that came with no event at all.
 let rzq = 0, lastGeo = "";
 const geo = () => `${innerWidth}x${innerHeight}|${screen.width}x${screen.height}`;
-const rescreen = () => { cancelAnimationFrame(rzq); rzq = requestAnimationFrame(() => { lastGeo = geo(); applyScreen(); }); };
+// 1.2.13: after a rotation or the keyboard, iOS could leave the page scrolled or the fixed reader at a stale height,
+// so the spread sat in a shorter box with a black band below it. The reader's height now follows the window and
+// any stray scroll is undone, checked with every screen signal and the poll.
+function fitApp() {
+  const de = document.documentElement, h = Math.round(Math.max(innerHeight, de.clientHeight));
+  if (!editing() && (scrollX || scrollY || (document.scrollingElement && document.scrollingElement.scrollTop))) {
+    scrollTo(0, 0); if (document.scrollingElement) document.scrollingElement.scrollTop = 0;
+  }
+  if (de.style.getPropertyValue("--app-h") !== h + "px") de.style.setProperty("--app-h", h + "px");
+}
+const rescreen = () => { cancelAnimationFrame(rzq); rzq = requestAnimationFrame(() => { lastGeo = geo(); fitApp(); applyScreen(); }); };
 addEventListener("resize", rescreen);
 addEventListener("orientationchange", rescreen);
 addEventListener("pageshow", rescreen);
-document.addEventListener("visibilitychange", () => { if (!document.hidden) { lastGeo = geo(); applyScreen(); } });
+document.addEventListener("visibilitychange", () => { if (!document.hidden) { lastGeo = geo(); fitApp(); applyScreen(); } });
 if (window.visualViewport) visualViewport.addEventListener("resize", rescreen);
-setInterval(() => { if (document.hidden) return; const g = geo(); if (g !== lastGeo) { lastGeo = g; applyScreen(); } }, 400);
+setInterval(() => { if (document.hidden) return; fitApp(); const g = geo(); if (g !== lastGeo) { lastGeo = g; applyScreen(); } }, 400);
+fitApp();
 
 /* ---- turning the cover (1.2.9): the same curl as a page turn (geometry, thresholds, easing, flick), drawn over the
    live library or reader in a transparent WebGL layer, so what's inside is revealed as the cover lifts.
@@ -1057,9 +1065,12 @@ void main() {
   vec3 c = texture2D(uTex, vUV).rgb;
   if (uStatic > 0.5) {
     // spread, far half: soft shadow just beyond the edge of the leaf landing on it.
-    // p = the leaf point that lands here (inverse of the flat, turned-over part of the roll).
+    // p = the leaf point that lands here (inverse of the flat, turned-over part of the roll). 1.2.13: the shadow is the
+    // distance from p to the leaf's rectangle, not just past its free edge; 1.2.12 measured only x, so the shadow ran
+    // on along the line of that edge beyond the leaf's corner, in a long diagonal band across the far page.
     vec2 p = vQ + uN * (PI * uR - 2.0 * vD);
-    float o = p.x - uMov.z;
+    vec2 e = max(vec2(p.x - uMov.z, max(-p.y, p.y - uMov.w)), 0.0);
+    float o = length(e);
     float sh = (vD < 0.0 && o > 0.0) ? 1.0 - smoothstep(0.0, 24.0 + 2.0 * uR, o) : 0.0;
     gl_FragColor = vec4(c * (1.0 - 0.32 * sh * uShadow) * gutter(), 1.0);
     return;
@@ -1500,15 +1511,12 @@ function updateChrome() {
   $("#volName").textContent = st.vol.title;
   $("#volSub").textContent = `${lab} / ${st.n}`;
   $("#pnum").textContent = `${lab} / ${st.n}`;
-  slider.max = st.n; slider.value = st.idx + 1; slider.dir = settings.dir;
   const nB = st.pack ? u.reduce((s, i) => s + (st.pack[i] && st.pack[i].bubbles ? st.pack[i].bubbles.length : 0), 0) : 0;
   const b = $("#boxBtn");
   b.hidden = !st.pack;
   b.classList.toggle("off", !settings.boxes);
   b.innerHTML = `読${nB ? `<small>${nB}</small>` : ""}`;
 }
-slider.addEventListener("input", () => { $("#pnum").textContent = `${slider.value} / ${st.n}`; });
-slider.addEventListener("change", () => showPage(+slider.value - 1));
 $("#boxBtn").addEventListener("click", () => { settings.boxes = !settings.boxes; kvSet("settings", settings); renderOverlay(); updateChrome(); });
 
 /* layout + zoom */
@@ -1859,7 +1867,7 @@ async function renderRepo() {
       : state === "failed" ? `<span class="badge fail">Failed</span>`
       : state === "processing" ? `<span class="badge proc">Processing on PC${pr != null ? " · " + pr + "%" : ""}</span>`
       : `<span class="badge none">no readings</span>`;
-    const sub = state === "failed" && v.detail ? `<div class="rnote">${esc(v.detail)}</div>`
+    const sub = (state === "failed" || state === "processing") && v.detail ? `<div class="rnote">${esc(v.detail)}</div>`
       : state === "ready" && have ? `<div class="rnote">Readings ready</div>` : "";
     const cu = await repoCover(v);
     return `<div class="vol" ${have ? `data-vol="${esc(localId)}"` : ""}>
@@ -2257,7 +2265,7 @@ document.addEventListener("click", e => {
 });
 
 /* ================= boot ================= */
-const APP_VERSION = "1.2.12";
+const APP_VERSION = "1.2.13";
 (async () => {
   settings = { ...DEF, ...(await kvGet("settings", {})) };
   st.vocab = await kvGet("vocab", []);
