@@ -32,7 +32,7 @@ button:disabled{opacity:.35;cursor:default}
 .ib svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 
 /* ---------- library ---------- */
-#lib{position:fixed;inset:0;display:flex;flex-direction:column;z-index:10}
+#lib{position:fixed;left:0;right:0;top:0;height:var(--app-h,100%);display:flex;flex-direction:column;z-index:10}
 .lib-head{display:flex;align-items:center;gap:8px;padding:calc(var(--st) + 10px) calc(var(--sr) + 12px) 10px calc(var(--sl) + 18px)}
 .lib-head h1{flex:1;margin:0;font-size:24px;letter-spacing:-.01em;display:flex;align-items:center;gap:10px}
 .lib-head h1 b{font:700 26px/1 "Hiragino Mincho ProN","Yu Mincho",serif;color:var(--accent)}
@@ -49,6 +49,17 @@ button:disabled{opacity:.35;cursor:default}
 .lchip.on{color:var(--text);background:#2f2f36;font-weight:600;border-color:#4a4a54}
 .lchip.on small{color:var(--gold);opacity:1}
 .nomatch{color:var(--mute);display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.lchip.danger{color:#ff8a7a;border-color:#5a2323;background:#2a1616}
+.lchip.danger:disabled{opacity:.4}
+.selbar .selcount{flex:1 1 100%;font-size:13.5px;color:var(--text);font-weight:600}
+.confirm{margin:-4px 0 16px;padding:12px 14px;border-radius:14px;background:#2a1616;border:1px solid #5a2323;display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.confirm p{margin:0 0 4px;flex:1 1 100%;font-size:13.5px;line-height:1.4;color:var(--text)}
+.vol.selecting .cv img{transition:opacity .15s}
+.vol.selecting:not(.picked) .cv img{opacity:.55}
+.vol .tick{position:absolute;right:7px;bottom:7px;width:26px;height:26px;border-radius:50%;border:2px solid #fff;background:rgba(14,14,16,.55);box-shadow:0 1px 4px rgba(0,0,0,.5)}
+.vol.picked .tick{background:var(--accent);border-color:var(--accent)}
+.vol.picked .tick::after{content:"";position:absolute;left:8px;top:3px;width:6px;height:12px;border:solid #fff;border-width:0 2.5px 2.5px 0;transform:rotate(45deg)}
+.vol.picked .cv{outline:2.5px solid var(--accent);outline-offset:-1px}
 .ser{margin:20px 0 10px;font-size:15px;font-weight:700;display:flex;align-items:baseline;gap:8px}
 .ser:first-of-type{margin-top:4px}
 .ser small{color:var(--mute);font-weight:500;font-size:12px}
@@ -363,7 +374,7 @@ const kvGet = async (k, d) => { try { const r = await get("kv", k); return r ? r
 const kvSet = (k, v) => put("kv", { k, v });
 
 /* ================= state ================= */
-const DEF = { level: 3, furi: "above", dir: "rtl", boxes: true, turn: "curl", spread: "auto", coverAlone: "on", outer: "cover", outerGeo: null, libSort: "recent", libFilter: "all" };
+const DEF = { level: 3, furi: "above", dir: "rtl", boxes: true, turn: "curl", spread: "auto", coverAlone: "on", outer: "cover", outerGeo: null, libSort: "recent", libFilter: "all", catSort: "added", catFilter: "all" };
 let settings = { ...DEF };
 const st = {
   vol: null, pack: null, idx: 0, n: 0, url: null,
@@ -403,7 +414,7 @@ function fmtBytes(b) { return b >= 1e9 ? (b / 1e9).toFixed(1) + " GB" : b >= 1e6
 let libTab = "device";
 document.querySelector(".tabs").addEventListener("click", e => {
   const b = e.target.closest("[data-tab]"); if (!b) return;
-  libTab = b.dataset.tab;
+  libTab = b.dataset.tab; libSel = null; libConfirm = false;
   document.querySelectorAll(".tabs button").forEach(x => x.classList.toggle("on", x === b));
   renderLibrary();
 });
@@ -412,6 +423,23 @@ document.querySelector(".tabs").addEventListener("click", e => {
 const LIB_SORTS = [["recent", "Recently read"], ["added", "Newest downloads"], ["added-old", "Oldest downloads"],
                    ["name", "Name (A–Z)"], ["name-desc", "Name (Z–A)"], ["series", "Series"]];
 const LIB_FILTERS = [["all", "All"], ["unread", "Unread"], ["reading", "Reading"], ["done", "Finished"], ["ready", "Readings ready"]];
+// 1.2.16: the Repository catalogue gets its own sort and filters (no reading state there; "added" = added on the laptop)
+const CAT_SORTS = [["added", "Newest added"], ["added-old", "Oldest added"], ["name", "Name (A–Z)"], ["name-desc", "Name (Z–A)"], ["series", "Series"]];
+const CAT_FILTERS = [["all", "All"], ["missing", "Not on phone"], ["phone", "On phone"], ["processing", "Processing"], ["ready", "Readings ready"]];
+let libSel = null, libConfirm = false;          // 1.2.16: select mode on "On this phone" (a Set of volume ids)
+function sortBar(kind, sorts, sort, filters, filt, count, extra = "") {
+  return `<div class="libbar">
+    <label class="sortsel"><span>Sort</span><select data-${kind}sort aria-label="Sort volumes">${sorts.map(([k, l]) =>
+      `<option value="${k}"${k === sort ? " selected" : ""}>${l}</option>`).join("")}</select></label>${extra}
+    <div class="chips" role="group" aria-label="Show">${filters.map(([k, l]) =>
+      `<button class="lchip${k === filt ? " on" : ""}" data-${kind}filter="${k}" aria-pressed="${k === filt}">${l}<small>${count(k)}</small></button>`).join("")}</div></div>`;
+}
+async function shelves(list, title, card) {         // Series view: one shelf per series, in the list's order
+  const groups = [];
+  for (const v of list) { const s = seriesInfo(title(v)).series, g = groups[groups.length - 1]; if (g && g.s === s) g.v.push(v); else groups.push({ s, v: [v] }); }
+  return (await Promise.all(groups.map(async g =>
+    `<h3 class="ser">${esc(g.s)}<small>${g.v.length}</small></h3><div class="grid">${(await Promise.all(g.v.map(card))).join("")}</div>`))).join("");
+}
 const numOr = x => { const n = parseFloat(x); return isNaN(n) ? NaN : n; };
 function seriesInfo(v) {
   const t = String(v.title || "");
@@ -439,8 +467,9 @@ function sortVols(vols, how) {
 }
 async function volCard(v) {
   const pct = v.pageCount ? Math.round(((v.lastPage || 0) + 1) / v.pageCount * 100) : 0, cu = await coverUrl(v);
-  return `<button class="vol" data-vol="${esc(v.id)}">
-      <div class="cv">${cu ? `<img src="${cu}" alt="">` : ""}</div>
+  const picked = libSel && libSel.has(v.id);
+  return `<button class="vol${libSel ? " selecting" : ""}${picked ? " picked" : ""}" data-vol="${esc(v.id)}"${libSel ? ` aria-pressed="${!!picked}"` : ""}>
+      <div class="cv">${cu ? `<img src="${cu}" alt="">` : ""}${libSel ? `<span class="tick" aria-hidden="true"></span>` : ""}</div>
       <span class="badge ${v.hasPack ? "" : v.repoId ? "proc" : "none"}">${v.hasPack ? "読 " + v.bubbles : v.repoId ? "readings pending" : "no readings"}</span>
       <div class="t">${esc(v.title)}</div>
       <div class="m">${v.lastReadAt ? `p. ${(v.lastPage || 0) + 1} / ${v.pageCount}` : `${v.pageCount} pages`}</div>
@@ -460,26 +489,29 @@ async function renderLibrary() {
   }
   const sort = LIB_SORTS.some(s => s[0] === settings.libSort) ? settings.libSort : "recent";
   const filt = LIB_FILTERS.some(f => f[0] === settings.libFilter) ? settings.libFilter : "all";
-  const count = k => allVols.filter(v => libMatch(v, k)).length;
-  const bar = `<div class="libbar">
-    <label class="sortsel"><span>Sort</span><select data-libsort aria-label="Sort volumes">${LIB_SORTS.map(([k, l]) =>
-      `<option value="${k}"${k === sort ? " selected" : ""}>${l}</option>`).join("")}</select></label>
-    <div class="chips" role="group" aria-label="Show">${LIB_FILTERS.map(([k, l]) =>
-      `<button class="lchip${k === filt ? " on" : ""}" data-libfilter="${k}" aria-pressed="${k === filt}">${l}<small>${count(k)}</small></button>`).join("")}</div></div>`;
   const vols = sortVols(allVols.filter(v => libMatch(v, filt)), sort);
+  let bar;
+  if (libSel) {
+    for (const id of [...libSel]) if (!allVols.some(v => v.id === id)) libSel.delete(id);
+    const n = libSel.size, allOn = vols.length && vols.every(v => libSel.has(v.id));
+    bar = `<div class="libbar selbar"><span class="selcount">${n ? `${n} selected` : "Tap volumes to select them"}</span>
+      <button class="lchip" data-libsel="all">${allOn ? "Select none" : "Select all"}</button>
+      <button class="lchip danger" data-libsel="remove"${n ? "" : " disabled"}>Remove${n ? " " + n : ""}</button>
+      <button class="lchip" data-libsel="done">Done</button></div>` +
+      (libConfirm && n ? `<div class="confirm" role="alertdialog" aria-label="Confirm removal"><p>Remove ${n === 1 ? "this volume" : `these ${n} volumes`} from this phone?
+        The pages, readings and reading position on this phone are deleted. Your laptop's Repository keeps its copy, so you can download ${n === 1 ? "it" : "them"} again.</p>
+        <button class="lchip danger" data-libsel="confirm">Remove</button><button class="lchip" data-libsel="cancel">Cancel</button></div>` : "");
+  } else {
+    bar = sortBar("lib", LIB_SORTS, sort, LIB_FILTERS, filt, k => allVols.filter(v => libMatch(v, k)).length,
+                  `<button class="lchip" data-libsel="start">Select</button>`);
+  }
   let html;
   if (!vols.length) {
     const why = { unread: "No unread volumes.", reading: "Nothing in progress.", done: "No finished volumes yet.",
                   ready: "No volumes with readings yet." }[filt] || "No volumes.";
     html = `<p class="nomatch">${why} <button class="lchip" data-libfilter="all">Show all</button></p>`;
-  } else if (sort === "series") {                 // one shelf per series, chapters in order
-    const groups = [];
-    for (const v of vols) {
-      const s = seriesInfo(v).series, g = groups[groups.length - 1];
-      if (g && g.s === s) g.v.push(v); else groups.push({ s, v: [v] });
-    }
-    html = (await Promise.all(groups.map(async g =>
-      `<h3 class="ser">${esc(g.s)}<small>${g.v.length}</small></h3><div class="grid">${(await Promise.all(g.v.map(volCard))).join("")}</div>`))).join("");
+  } else if (sort === "series") {
+    html = await shelves(vols, v => v, volCard);
   } else {
     html = `<div class="grid">${(await Promise.all(vols.map(volCard))).join("")}</div>`;
   }
@@ -487,9 +519,38 @@ async function renderLibrary() {
   if (libTab !== "device") return;
   body.innerHTML = bar + html + foot;
 }
+// 1.2.16: remove volumes from this phone: pages, reading pack and record (saved words stay)
+async function removeVolumes(ids) {
+  for (const id of ids) {
+    await tx(["pages", "packs", "volumes"], "readwrite", t => {
+      t.objectStore("pages").delete(IDBKeyRange.bound([id, 0], [id, Infinity]));
+      t.objectStore("packs").delete(id); t.objectStore("volumes").delete(id);
+    });
+    const u = coverUrls.get(id); if (u) URL.revokeObjectURL(u); coverUrls.delete(id);
+  }
+}
+async function libSelAction(a) {
+  if (a === "start") { libSel = new Set(); libConfirm = false; }
+  else if (a === "done") { libSel = null; libConfirm = false; }
+  else if (a === "all") {
+    const vols = (await all("volumes")).filter(v => libMatch(v, settings.libFilter || "all"));
+    const allOn = vols.length && vols.every(v => libSel.has(v.id));
+    vols.forEach(v => allOn ? libSel.delete(v.id) : libSel.add(v.id));
+  }
+  else if (a === "remove") libConfirm = libSel.size > 0;
+  else if (a === "cancel") libConfirm = false;
+  else if (a === "confirm") {
+    const n = libSel.size;
+    busy(`Removing ${n} volume${n === 1 ? "" : "s"}…`);
+    try { await removeVolumes([...libSel]); } finally { busy(""); }
+    libSel = null; libConfirm = false;
+    toast(`Removed ${n} volume${n === 1 ? "" : "s"} from this phone.`);
+  }
+  renderLibrary();
+}
 $("#libBody").addEventListener("change", e => {
-  const s = e.target.closest("[data-libsort]"); if (!s) return;
-  settings.libSort = s.value; kvSet("settings", settings); renderLibrary();
+  const s = e.target.closest("[data-libsort],[data-catsort]"); if (!s) return;
+  settings[s.hasAttribute("data-libsort") ? "libSort" : "catSort"] = s.value; kvSet("settings", settings); renderLibrary();
 });
 async function footer() {
   let s = "";
@@ -497,8 +558,15 @@ async function footer() {
   return `<div class="foot">${s}${s ? " · " : ""}Koma ${APP_VERSION}</div>`;
 }
 $("#libBody").addEventListener("click", e => {
-  const f = e.target.closest("[data-libfilter]");
-  if (f) { settings.libFilter = f.dataset.libfilter; kvSet("settings", settings); renderLibrary(); return; }
+  const f = e.target.closest("[data-libfilter],[data-catfilter]");
+  if (f) { if (f.dataset.libfilter) settings.libFilter = f.dataset.libfilter; else settings.catFilter = f.dataset.catfilter;
+           kvSet("settings", settings); renderLibrary(); return; }
+  const ls = e.target.closest("[data-libsel]"); if (ls) { libSelAction(ls.dataset.libsel); return; }
+  if (libSel && libTab === "device") {                 // select mode: a tap picks the volume instead of opening it
+    const pv = e.target.closest("[data-vol]");
+    if (pv) { libSel.has(pv.dataset.vol) ? libSel.delete(pv.dataset.vol) : libSel.add(pv.dataset.vol); libConfirm = false; renderLibrary(); }
+    return;
+  }
   const g = e.target.closest("[data-get]"); if (g) { downloadFromRepo(g.dataset.get); return; }
   const v = e.target.closest("[data-vol]"); if (v) openVolume(v.dataset.vol);
   const a = e.target.closest("[data-repo]"); if (a) repoAction(a.dataset.repo);
@@ -886,8 +954,28 @@ const geo = () => `${innerWidth}x${innerHeight}|${screen.width}x${screen.height}
 // 1.2.13: after a rotation or the keyboard, iOS could leave the page scrolled or the fixed reader at a stale height,
 // so the spread sat in a shorter box with a black band below it. The reader's height now follows the window and
 // any stray scroll is undone, checked with every screen signal and the poll.
+// 1.2.16: on Patrick's Duo the band came back with 1.2.13: iOS can report the stale, shorter height through innerHeight
+// and clientHeight alike (the band is the page's own background, so the web view itself is full size). When the
+// window's width is exactly one side of the screen, the screen's other side is the true height: use the larger.
+let fitFix = "";
+// Only in the Home Screen app (full-screen web view: black-translucent status bar, viewport-fit=cover); in a Safari
+// tab the toolbars make the window legitimately shorter than the screen.
+const standalone = () => navigator.standalone === true || (window.matchMedia && matchMedia("(display-mode: standalone)").matches);
+function screenH() {
+  const sw = screen.width, sh = screen.height, w = innerWidth;
+  if (!sw || !sh || !standalone()) return 0;
+  if (Math.abs(w - sw) <= 1) return sh;
+  if (Math.abs(w - sh) <= 1) return sw;
+  return 0;
+}
 function fitApp() {
-  const de = document.documentElement, h = Math.round(Math.max(innerHeight, de.clientHeight));
+  const de = document.documentElement, base = Math.round(Math.max(innerHeight, de.clientHeight)), sH = screenH();
+  const h = !editing() && sH > base + 8 && sH < base * 1.6 ? sH : base;
+  const fx = h !== base ? `${innerWidth}×${base} → ${h}` : "";
+  if (fx !== fitFix) {
+    fitFix = fx;
+    if (fx) { modeLog.push(`${new Date().toTimeString().slice(0, 8)} height fixed ${fx}`); if (modeLog.length > 5) modeLog.shift(); scrInfoPaint(); }
+  }
   if (!editing() && (scrollX || scrollY || (document.scrollingElement && document.scrollingElement.scrollTop))) {
     scrollTo(0, 0); if (document.scrollingElement) document.scrollingElement.scrollTop = 0;
   }
@@ -1961,9 +2049,15 @@ async function renderRepo() {
   const head = repoSeg() + `<div class="rhead"><span><b>${esc(repo.name)}</b>${repoIndex ? ` · ${repoIndex.volumes.length} volume${repoIndex.volumes.length === 1 ? "" : "s"}` : ""}</span>
     <button class="dk" data-repo="refresh">Refresh</button><button class="dk" data-repo="remove">Remove</button></div>`;
   if (repoErr) { body.innerHTML = head + `<div class="err">${esc(repoErr)}</div>`; return; }
-  const vols = repoIndex.volumes;
-  if (!vols.length) { body.innerHTML = head + `<div class="empty"><p>The repository is empty. Volumes appear here once the laptop finishes processing them.</p></div>`; return; }
-  const cards = await Promise.all(vols.map(async v => {
+  const allRepo = repoIndex.volumes;
+  if (!allRepo.length) { body.innerHTML = head + `<div class="empty"><p>The repository is empty. Volumes appear here once the laptop finishes processing them.</p></div>`; return; }
+  const cs = CAT_SORTS.some(x => x[0] === settings.catSort) ? settings.catSort : "added";
+  const cf = CAT_FILTERS.some(x => x[0] === settings.catFilter) ? settings.catFilter : "all";
+  const catMatch = (v, f) => f === "all" || (f === "missing" ? !local.has(v.id) : f === "phone" ? local.has(v.id) : repoState(v) === f);
+  const prox = allRepo.filter(v => catMatch(v, cf)).map(v => ({ title: v.title, file: String(v.cbz || "").split("/").pop(), addedAt: Date.parse(v.added) || 0, _v: v }));
+  const vols = sortVols(prox, cs).map(x => x._v);
+  const bar = sortBar("cat", CAT_SORTS, cs, CAT_FILTERS, cf, k => allRepo.filter(v => catMatch(v, k)).length);
+  const repoCard = async v => {
     const localId = local.get(v.id), have = !!localId, busyPct = repoBusy.get(v.id);
     const state = repoState(v);
     const btn = busyPct != null ? `<span class="get busy">${busyPct}%</span>`
@@ -1983,8 +2077,12 @@ async function renderRepo() {
       ${badge}
       <div class="t">${esc(v.title)}</div>
       <div class="m">${v.pages ? v.pages + " pages · " : ""}${fmtBytes(v.bytes || 0)}</div>${sub}</div>`;
-  }));
-  body.innerHTML = head + `<div class="grid">${cards.join("")}</div>${await footer()}`;
+  };
+  const grid = !vols.length ? `<p class="nomatch">Nothing here with this filter. <button class="lchip" data-catfilter="all">Show all</button></p>`
+    : cs === "series" ? await shelves(vols, v => ({ title: v.title }), repoCard)
+    : `<div class="grid">${(await Promise.all(vols.map(repoCard))).join("")}</div>`;
+  if (libTab !== "repo" || repoView !== "catalogue") return;
+  body.innerHTML = head + bar + grid + await footer();
   scheduleLive();
 }
 async function repoAction(a) {
@@ -2373,7 +2471,7 @@ document.addEventListener("click", e => {
 });
 
 /* ================= boot ================= */
-const APP_VERSION = "1.2.15";
+const APP_VERSION = "1.2.16";
 (async () => {
   settings = { ...DEF, ...(await kvGet("settings", {})) };
   st.vocab = await kvGet("vocab", []);
