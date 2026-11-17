@@ -769,7 +769,24 @@ const wideOf = vol => i => { const d = vol.dims && vol.dims[i]; return !!(d && d
 // (1.2.18-1.2.19's mid-chapter `singles`/`unsingles` are no longer used.)
 const shiftOn = vol => vol.pairShift != null ? !!vol.pairShift : settings.autoPair !== "off" && !!vol.autoShift;
 const shiftPage = () => settings.coverAlone !== "off" ? 1 : 0;
-const soloOf = vol => new Set(shiftOn(vol) && vol.pageCount > shiftPage() + 1 ? [shiftPage()] : []);
+// 1.2.21 (Patrick): chapters often open with a special double-page spread in pages 1-3. If one of those is already
+// paired correctly, the shift leaves the opening alone and starts from page 4 onwards (the first spread that starts
+// at page 4 or later stands alone instead of page 2).
+function defaultUnitOf(vol) {
+  const n = vol.pageCount, uo = new Int32Array(n), u = unitsFor(n, wideOf(vol), new Set());
+  u.forEach((x, k) => x.forEach(p => { uo[p] = k; }));
+  return { u, uo };
+}
+function lateShiftPage(vol) {                          // first spread starting at page 4 (index 3) or later
+  const { u } = defaultUnitOf(vol), x = u.find(un => un[0] >= 3);
+  return x ? x[0] : shiftPage();
+}
+function earlySpreadPaired(vol) {                      // a detected spread in pages 1-3 that the normal pairing keeps whole
+  const { uo } = defaultUnitOf(vol);
+  return (vol.autoSeams || []).some(j => j <= 2 && j + 1 < vol.pageCount && uo[j] === uo[j + 1]);
+}
+const shiftAt = vol => vol.autoShiftAt != null ? vol.autoShiftAt : earlySpreadPaired(vol) ? lateShiftPage(vol) : shiftPage();
+const soloOf = vol => { const at = shiftAt(vol); return new Set(shiftOn(vol) && vol.pageCount > at + 1 ? [at] : []); };
 function buildUnits() {
   const n = st.n, u = unitsFor(n, isWide, soloOf(st.vol));
   st.units = u; st.unitOf = new Int32Array(n);
@@ -777,11 +794,11 @@ function buildUnits() {
   st.unitsKey = unitsKeyNow();
 }
 const unitsKeyNow = () => [st.vol.id, st.n, settings.coverAlone, st.vol.dims ? 1 : 0, settings.autoPair,
-  String(st.vol.pairShift), String(!!st.vol.autoShift)].join("|");
-// How many detected seams each choice keeps inside one spread.
-function seamsJoined(vol, shifted) {
-  const n = vol.pageCount, uo = new Int32Array(n), sp = shiftPage();
-  unitsFor(n, wideOf(vol), new Set(shifted && n > sp + 1 ? [sp] : [])).forEach((x, k) => x.forEach(p => { uo[p] = k; }));
+  String(st.vol.pairShift), String(!!st.vol.autoShift), String(st.vol.autoShiftAt), (st.vol.autoSeams || []).join(",")].join("|");
+// How many detected seams stay inside one spread when page `at` stands alone (null: no shift).
+function seamsJoined(vol, at) {
+  const n = vol.pageCount, uo = new Int32Array(n);
+  unitsFor(n, wideOf(vol), new Set(at != null && n > at + 1 ? [at] : [])).forEach((x, k) => x.forEach(p => { uo[p] = k; }));
   return (vol.autoSeams || []).filter(j => j + 1 < n && uo[j] === uo[j + 1]).length;
 }
 
@@ -792,7 +809,7 @@ function seamsJoined(vol, shifted) {
    mean difference under 20%, and it beats the seams either side by 0.25 (a page can join only one neighbour).
    Tuned on Kagurabachi Ch.1 (54 pages): true seams scored 0.98, 0.89, 0.93; every other seam ≤ 0.6.
    The manual ⇄ shift stays as the backup and wins over the automatic one. ---- */
-const AUTO_KEY = () => `3|${settings.dir === "ltr" ? "ltr" : "rtl"}|${settings.coverAlone}`;
+const AUTO_KEY = () => `4|${settings.dir === "ltr" ? "ltr" : "rtl"}|${settings.coverAlone}`;
 const autoBusy = new Set();
 async function pageEdges(volId, i, x) {
   const rec = await get("pages", [volId, i]); if (!rec) return null;
@@ -851,11 +868,15 @@ async function autoPairs(vol) {
     for (let j = 0; j < n - 1; j++)
       if (S[j] != null && S[j] >= 0.8 && [S[j - 1], S[j + 1]].every(v => v == null || S[j] - v >= 0.25)) seams.push(j);
     vol.autoSeams = seams; vol.autoKey = AUTO_KEY(); window.__komaSeams = S;
-    const j0 = seamsJoined(vol, false), j1 = seamsJoined(vol, true);
-    vol.autoShift = j1 > j0;                               // shift only when it lines up more double-page art
-    window.__komaJoined = [j0, j1];
+    // three choices: no shift, shift from page 2, shift from page 4 onwards; the one that keeps most spreads whole
+    // wins (ties: no shift, then from page 2, the whole chapter; from page 4 only when that keeps an opening spread)
+    const sp = shiftPage(), late = lateShiftPage(vol);
+    const j0 = seamsJoined(vol, null), j1 = seamsJoined(vol, sp), jl = late !== sp ? seamsJoined(vol, late) : -1;
+    const bestShift = jl > j1 ? late : sp, jb = Math.max(j1, jl);
+    vol.autoShift = jb > j0; vol.autoShiftAt = vol.autoShift ? bestShift : null;
+    window.__komaJoined = [j0, j1, jl];
     const cur = await get("volumes", vol.id);
-    if (cur) { cur.autoSeams = seams; cur.autoKey = vol.autoKey; cur.autoShift = vol.autoShift; await put("volumes", cur); }
+    if (cur) { cur.autoSeams = seams; cur.autoKey = vol.autoKey; cur.autoShift = vol.autoShift; cur.autoShiftAt = vol.autoShiftAt; await put("volumes", cur); }
     if (st.vol && st.vol.id === vol.id && st.spread) {
       const before = st.unitsKey;
       const apply = () => {
@@ -863,7 +884,7 @@ async function autoPairs(vol) {
         buildUnits();
         if (st.unitsKey === before) return;
         showPage(st.idx);
-        if (shiftOn(vol)) toast(`Shifted this chapter's pages by one so its double-page art lines up (page ${shiftPage() + 1} now on its own). Tap ⇄ to undo.`);
+        if (shiftOn(vol)) toast(`Shifted this chapter's pages by one so its double-page art lines up (page ${shiftAt(vol) + 1} now on its own${shiftAt(vol) > shiftPage() ? "; the opening pages are left as they are" : ""}). Tap ⇄ to undo.`);
       };
       apply();
     }
@@ -872,13 +893,13 @@ async function autoPairs(vol) {
 // ⇄ (two-page view): shift the whole chapter's pairing by one page, or back. Keeps the page you're on in view.
 async function shiftPairs() {
   if (!st.spread || !st.unit || !st.vol) return;
-  if (st.n <= shiftPage() + 2) { toast("This volume is too short to re-pair."); return; }
+  if (st.n <= shiftAt(st.vol) + 2) { toast("This volume is too short to re-pair."); return; }
   const keep = st.unit[0], on = !shiftOn(st.vol);
   st.vol.pairShift = on;
   const cur = await get("volumes", st.vol.id);
   if (cur) { cur.pairShift = on; await put("volumes", cur); }
   turnReset(); buildUnits(); await showPage(keep);
-  toast(on ? `Pages shifted by one for this chapter: page ${shiftPage() + 1} is now on its own and every pair after it moves along. Tap ⇄ again to undo.`
+  toast(on ? `Pages shifted by one for this chapter: page ${shiftAt(st.vol) + 1} is now on its own and every pair after it moves along. Tap ⇄ again to undo.`
            : "Pairing back to normal for this chapter.");
 }
 // Where each page of spread k sits on screen. Slot 0 holds the lower page (right in RTL), slot 1 the higher.
@@ -2618,7 +2639,7 @@ document.addEventListener("click", e => {
 });
 
 /* ================= boot ================= */
-const APP_VERSION = "1.2.20";
+const APP_VERSION = "1.2.21";
 (async () => {
   settings = { ...DEF, ...(await kvGet("settings", {})) };
   st.vocab = await kvGet("vocab", []);
