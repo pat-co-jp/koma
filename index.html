@@ -38,6 +38,20 @@ button:disabled{opacity:.35;cursor:default}
 .lib-head h1 b{font:700 26px/1 "Hiragino Mincho ProN","Yu Mincho",serif;color:var(--accent)}
 .lib-body{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:6px calc(var(--sr) + 16px) calc(var(--sb) + 30px) calc(var(--sl) + 16px)}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(132px,1fr));gap:16px}
+/* library sort and filter (1.2.15) */
+.libbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin:0 0 16px}
+.sortsel{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--mute)}
+.sortsel select{min-height:44px;padding:0 34px 0 14px;border-radius:12px;border:1px solid var(--line);color:var(--text);font:600 14px system-ui,-apple-system,sans-serif;
+  -webkit-appearance:none;appearance:none;background:#1c1c21 url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' fill='none' stroke='%23999' stroke-width='1.6'/%3E%3C/svg%3E") no-repeat right 12px center/11px 8px}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.lchip{min-height:44px;padding:0 14px;border-radius:999px;border:1px solid var(--line);background:var(--panel);color:var(--mute);font-size:13.5px;display:inline-flex;align-items:center;gap:7px}
+.lchip small{font-size:12px;opacity:.75;font-variant-numeric:tabular-nums}
+.lchip.on{color:var(--text);background:#2f2f36;font-weight:600;border-color:#4a4a54}
+.lchip.on small{color:var(--gold);opacity:1}
+.nomatch{color:var(--mute);display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.ser{margin:20px 0 10px;font-size:15px;font-weight:700;display:flex;align-items:baseline;gap:8px}
+.ser:first-of-type{margin-top:4px}
+.ser small{color:var(--mute);font-weight:500;font-size:12px}
 .vol{position:relative;text-align:left;display:block;width:100%}
 .vol .cv{position:relative;aspect-ratio:1/1.42;border-radius:10px;overflow:hidden;background:var(--panel);border:1px solid var(--line)}
 .vol .cv img{width:100%;height:100%;object-fit:cover;display:block}
@@ -349,7 +363,7 @@ const kvGet = async (k, d) => { try { const r = await get("kv", k); return r ? r
 const kvSet = (k, v) => put("kv", { k, v });
 
 /* ================= state ================= */
-const DEF = { level: 3, furi: "above", dir: "rtl", boxes: true, turn: "curl", spread: "auto", coverAlone: "on", outer: "cover", outerGeo: null };
+const DEF = { level: 3, furi: "above", dir: "rtl", boxes: true, turn: "curl", spread: "auto", coverAlone: "on", outer: "cover", outerGeo: null, libSort: "recent", libFilter: "all" };
 let settings = { ...DEF };
 const st = {
   vol: null, pack: null, idx: 0, n: 0, url: null,
@@ -393,37 +407,98 @@ document.querySelector(".tabs").addEventListener("click", e => {
   document.querySelectorAll(".tabs button").forEach(x => x.classList.toggle("on", x === b));
   renderLibrary();
 });
+/* ---- library sort and filter (1.2.15). Series and chapter come from the archive's ComicInfo.xml (saved at import
+   from 1.2.15; the Online Library adds one) or, for older imports, from the title: "Series - Ch.12 …", "第12話". ---- */
+const LIB_SORTS = [["recent", "Recently read"], ["added", "Newest downloads"], ["added-old", "Oldest downloads"],
+                   ["name", "Name (A–Z)"], ["name-desc", "Name (Z–A)"], ["series", "Series"]];
+const LIB_FILTERS = [["all", "All"], ["unread", "Unread"], ["reading", "Reading"], ["done", "Finished"], ["ready", "Readings ready"]];
+const numOr = x => { const n = parseFloat(x); return isNaN(n) ? NaN : n; };
+function seriesInfo(v) {
+  const t = String(v.title || "");
+  const series = (v.series || (t.includes(" - ") ? t.slice(0, t.indexOf(" - "))
+    : t.replace(/\s*(第\s*\d.*|(?:Vol(?:ume)?|Ch(?:apter)?)\.?\s*\d.*)$/i, "")) || t).trim();
+  const cm = t.match(/Ch(?:apter)?\.?\s*(\d+(?:\.\d+)?)/i) || t.match(/第\s*(\d+(?:\.\d+)?)\s*話/) || t.match(/#\s*(\d+(?:\.\d+)?)/);
+  const vm = t.match(/Vol(?:ume)?\.?\s*(\d+)/i) || t.match(/第\s*(\d+)\s*巻/);
+  return { series, vol: v.volNo != null ? numOr(v.volNo) : vm ? +vm[1] : NaN, ch: v.num != null ? numOr(v.num) : cm ? +cm[1] : NaN };
+}
+const libState = v => !v.lastReadAt ? "unread" : (v.lastPage || 0) >= (v.pageCount || 1) - 1 ? "done" : "reading";
+const libMatch = (v, f) => f === "all" || (f === "ready" ? !!v.hasPack : libState(v) === f);
+const nameOf = v => v.file ? stemOf(v.file) : String(v.title || "");
+const cmpNum = (a, b) => (isNaN(a) ? Infinity : a) - (isNaN(b) ? Infinity : b);
+function sortVols(vols, how) {
+  const by = {
+    recent: (a, b) => (b.lastReadAt || b.addedAt || 0) - (a.lastReadAt || a.addedAt || 0),
+    added: (a, b) => (b.addedAt || 0) - (a.addedAt || 0),
+    "added-old": (a, b) => (a.addedAt || 0) - (b.addedAt || 0),
+    name: (a, b) => nat(nameOf(a), nameOf(b)),
+    "name-desc": (a, b) => nat(nameOf(b), nameOf(a)),
+    series: (a, b) => { const x = seriesInfo(a), y = seriesInfo(b);
+      return nat(x.series, y.series) || cmpNum(x.vol, y.vol) || cmpNum(x.ch, y.ch) || nat(nameOf(a), nameOf(b)); },
+  };
+  return vols.sort(by[how] || by.recent);
+}
+async function volCard(v) {
+  const pct = v.pageCount ? Math.round(((v.lastPage || 0) + 1) / v.pageCount * 100) : 0, cu = await coverUrl(v);
+  return `<button class="vol" data-vol="${esc(v.id)}">
+      <div class="cv">${cu ? `<img src="${cu}" alt="">` : ""}</div>
+      <span class="badge ${v.hasPack ? "" : v.repoId ? "proc" : "none"}">${v.hasPack ? "読 " + v.bubbles : v.repoId ? "readings pending" : "no readings"}</span>
+      <div class="t">${esc(v.title)}</div>
+      <div class="m">${v.lastReadAt ? `p. ${(v.lastPage || 0) + 1} / ${v.pageCount}` : `${v.pageCount} pages`}</div>
+      <div class="bar"><i style="width:${v.lastReadAt ? pct : 0}%"></i></div></button>`;
+}
 async function renderLibrary() {
   if (libTab === "repo") return renderRepo();
-  const vols = (await all("volumes")).sort((a, b) => (b.lastReadAt || b.addedAt) - (a.lastReadAt || a.addedAt));
+  const allVols = await all("volumes");
   const body = $("#libBody");
   if (libTab !== "device") return;          // switched tabs while loading: don't paint over the other tab
-  if (!vols.length) {
+  if (!allVols.length) {
     body.innerHTML = `<div class="empty">
       <p>No volumes yet. Your laptop prepares them: drop a <b>.cbz</b> into <b>iCloud Drive › 6. Automation › Koma › Inbox</b>, and it appears in <b>Koma › Library</b> with a matching <b>.koma.json</b> reading pack.</p>
       <button class="big" data-act="import">Import a volume</button>
       <ol><li>Tap Import and open the volume's folder in Library.</li><li>Select both the <b>.cbz</b> and the <b>.koma.json</b>.</li><li>It's stored in Koma and reads fully offline from then on.</li></ol></div>${await footer()}`;
     return;
   }
-  const cards = await Promise.all(vols.map(async v => {
-    const pct = v.pageCount ? Math.round(((v.lastPage || 0) + 1) / v.pageCount * 100) : 0;
-    return `<button class="vol" data-vol="${esc(v.id)}">
-      <div class="cv">${(await coverUrl(v)) ? `<img src="${await coverUrl(v)}" alt="">` : ""}</div>
-      <span class="badge ${v.hasPack ? "" : v.repoId ? "proc" : "none"}">${v.hasPack ? "読 " + v.bubbles : v.repoId ? "readings pending" : "no readings"}</span>
-      <div class="t">${esc(v.title)}</div>
-      <div class="m">${v.lastReadAt ? `p. ${(v.lastPage || 0) + 1} / ${v.pageCount}` : `${v.pageCount} pages`}</div>
-      <div class="bar"><i style="width:${v.lastReadAt ? pct : 0}%"></i></div></button>`;
-  }));
+  const sort = LIB_SORTS.some(s => s[0] === settings.libSort) ? settings.libSort : "recent";
+  const filt = LIB_FILTERS.some(f => f[0] === settings.libFilter) ? settings.libFilter : "all";
+  const count = k => allVols.filter(v => libMatch(v, k)).length;
+  const bar = `<div class="libbar">
+    <label class="sortsel"><span>Sort</span><select data-libsort aria-label="Sort volumes">${LIB_SORTS.map(([k, l]) =>
+      `<option value="${k}"${k === sort ? " selected" : ""}>${l}</option>`).join("")}</select></label>
+    <div class="chips" role="group" aria-label="Show">${LIB_FILTERS.map(([k, l]) =>
+      `<button class="lchip${k === filt ? " on" : ""}" data-libfilter="${k}" aria-pressed="${k === filt}">${l}<small>${count(k)}</small></button>`).join("")}</div></div>`;
+  const vols = sortVols(allVols.filter(v => libMatch(v, filt)), sort);
+  let html;
+  if (!vols.length) {
+    const why = { unread: "No unread volumes.", reading: "Nothing in progress.", done: "No finished volumes yet.",
+                  ready: "No volumes with readings yet." }[filt] || "No volumes.";
+    html = `<p class="nomatch">${why} <button class="lchip" data-libfilter="all">Show all</button></p>`;
+  } else if (sort === "series") {                 // one shelf per series, chapters in order
+    const groups = [];
+    for (const v of vols) {
+      const s = seriesInfo(v).series, g = groups[groups.length - 1];
+      if (g && g.s === s) g.v.push(v); else groups.push({ s, v: [v] });
+    }
+    html = (await Promise.all(groups.map(async g =>
+      `<h3 class="ser">${esc(g.s)}<small>${g.v.length}</small></h3><div class="grid">${(await Promise.all(g.v.map(volCard))).join("")}</div>`))).join("");
+  } else {
+    html = `<div class="grid">${(await Promise.all(vols.map(volCard))).join("")}</div>`;
+  }
   const foot = await footer();
   if (libTab !== "device") return;
-  body.innerHTML = `<div class="grid">${cards.join("")}</div>${foot}`;
+  body.innerHTML = bar + html + foot;
 }
+$("#libBody").addEventListener("change", e => {
+  const s = e.target.closest("[data-libsort]"); if (!s) return;
+  settings.libSort = s.value; kvSet("settings", settings); renderLibrary();
+});
 async function footer() {
   let s = "";
   try { const e = await navigator.storage.estimate(); s = `Using ${fmtBytes(e.usage || 0)} on this device`; } catch {}
   return `<div class="foot">${s}${s ? " · " : ""}Koma ${APP_VERSION}</div>`;
 }
 $("#libBody").addEventListener("click", e => {
+  const f = e.target.closest("[data-libfilter]");
+  if (f) { settings.libFilter = f.dataset.libfilter; kvSet("settings", settings); renderLibrary(); return; }
   const g = e.target.closest("[data-get]"); if (g) { downloadFromRepo(g.dataset.get); return; }
   const v = e.target.closest("[data-vol]"); if (v) openVolume(v.dataset.vol);
   const a = e.target.closest("[data-repo]"); if (a) repoAction(a.dataset.repo);
@@ -512,9 +587,19 @@ async function importArchive(file, id, pack) {
     await put("pages", { vol: id, i, name: names[i], blob });
   }
   const prev = await get("volumes", id);
+  // 1.2.15: series and chapter from ComicInfo.xml when the archive has one (the Online Library always adds it)
+  let ci = {};
+  const cx = Object.values(zip.files).find(f => !f.dir && /(^|\/)ComicInfo\.xml$/i.test(f.name));
+  if (cx) try {
+    const d = new DOMParser().parseFromString(await cx.async("string"), "application/xml");
+    const g = n => { const e = d.getElementsByTagName(n)[0]; return e ? e.textContent.trim() : ""; };
+    ci = { series: g("Series") || undefined, num: g("Number") !== "" ? numOr(g("Number")) : undefined,
+           volNo: g("Volume") !== "" ? numOr(g("Volume")) : undefined };
+  } catch {}
   const vol = { id, title: (pack && pack.title) || stemOf(file.name), names, pageCount: names.length, bytes: file.size, dims,
     addedAt: prev ? prev.addedAt : Date.now(), lastPage: prev ? prev.lastPage : 0, lastReadAt: prev ? prev.lastReadAt : 0,
-    hasPack: false, bubbles: 0, repoId: prev ? prev.repoId : undefined };
+    hasPack: false, bubbles: 0, repoId: prev ? prev.repoId : undefined, file: file.name,
+    series: ci.series ?? (prev && prev.series), num: ci.num ?? (prev && prev.num), volNo: ci.volNo ?? (prev && prev.volNo) };
   await put("volumes", vol);
   coverUrls.delete(id);
   if (pack) await attachPack(vol, pack);
@@ -2288,7 +2373,7 @@ document.addEventListener("click", e => {
 });
 
 /* ================= boot ================= */
-const APP_VERSION = "1.2.14";
+const APP_VERSION = "1.2.15";
 (async () => {
   settings = { ...DEF, ...(await kvGet("settings", {})) };
   st.vocab = await kvGet("vocab", []);
