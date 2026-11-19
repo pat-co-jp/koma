@@ -479,7 +479,14 @@ function trackWorker(w) {
   if (!w || !navigator.serviceWorker.controller) return;
   if (w.state === "installed") { offerUpdate(w); return; }
   if (w.state === "installing") updStatus = `Downloading a new version… (${hhmm()})`;
-  w.addEventListener("statechange", () => { if (w.state === "installed") offerUpdate(w); else if (w.state === "redundant" && !updateWorker) updStatus = `The new version failed to install (${hhmm()}). Try Check for updates again.`; });
+  if (w.__tracked) return; w.__tracked = true;
+  w.addEventListener("statechange", () => { if (w.state === "installed") offerUpdate(w); else if (w.state === "redundant" && !updateWorker) { updStatus = `The new version failed to install (${hhmm()}). Try Check for updates again.`; if (!panel.hidden && panel.querySelector("#scrInfo")) openSettings(); } });
+}
+const verNewer = (a, b) => { const x = a.split(".").map(Number), y = b.split(".").map(Number);
+  for (let i = 0; i < Math.max(x.length, y.length); i++) { const d = (x[i] || 0) - (y[i] || 0); if (d) return d > 0; } return false; };
+async function siteVersion() {                       // the version the site serves now (never from a cache)
+  try { const r = await fetch("sw.js?probe=" + Date.now(), { cache: "no-store" }); if (!r.ok) return "";
+        const m = (await r.text()).match(/koma-v(\d+(?:\.\d+)+)/); return m ? m[1] : ""; } catch { return ""; }
 }
 async function checkUpdate(manual) {
   if (!swReg || updChecking) return;
@@ -488,7 +495,21 @@ async function checkUpdate(manual) {
   try {
     await swReg.update();
     trackWorker(swReg.waiting); trackWorker(swReg.installing);
-    if (!updateWorker && !swReg.installing) updStatus = `Up to date (checked ${hhmm()}).`;
+    if (!updateWorker && !swReg.installing) {
+      // 1.2.27: iOS's check can come back empty although the site has a newer version. Ask the site directly; if it is
+      // newer, register the worker under a new script URL, which makes the browser fetch and install it.
+      const sv = await siteVersion();
+      if (sv && verNewer(sv, APP_VERSION)) {
+        updStatus = `Version ${sv} is on the site; installing it… (${hhmm()})`;
+        try {
+          const r = await navigator.serviceWorker.register("sw.js?v=" + sv);
+          if (r !== swReg) { swReg = r; r.addEventListener("updatefound", () => trackWorker(r.installing)); }
+          trackWorker(r.installing); trackWorker(r.waiting);
+          await new Promise(res => setTimeout(res, 300)); trackWorker(r.installing); trackWorker(r.waiting);
+        } catch (e) { updStatus = `Version ${sv} is on the site, but it couldn't be installed (${hhmm()}): ${e && e.message || e}.`; }
+      } else updStatus = sv ? `Up to date: ${APP_VERSION} is the latest (checked ${hhmm()}).`
+                            : `Up to date as far as iOS knows (checked ${hhmm()}; the site couldn't be reached to confirm).`;
+    }
   } catch (e) {
     updStatus = `Couldn't check for updates (${hhmm()}): ${navigator.onLine ? (e && e.message ? e.message : "no answer") : "offline"}.`;
   }
@@ -2807,7 +2828,7 @@ document.addEventListener("click", e => {
 
 /* ================= boot ================= */
 const applyGlass = () => document.documentElement.classList.toggle("glass", settings.glass !== "off");
-const APP_VERSION = "1.2.26";
+const APP_VERSION = "1.2.27";
 (async () => {
   settings = { ...DEF, ...(await kvGet("settings", {})) };
   applyGlass();
@@ -2822,7 +2843,9 @@ const APP_VERSION = "1.2.26";
   if (repo && navigator.onLine) loadRepoIndex().then(() => scheduleLive());
 })();
 if ("serviceWorker" in navigator) {
-  navigator.serviceWorker.register("sw.js").then(reg => {
+  const ctl = navigator.serviceWorker.controller;
+  const swUrl = ctl && /\/sw\.js(\?|$)/.test(ctl.scriptURL) ? "sw.js" + new URL(ctl.scriptURL).search : "sw.js";
+  navigator.serviceWorker.register(swUrl).then(reg => {
     // 1.2.3: an update that was downloaded earlier but never applied is offered again on every start,
     // the offer stays until tapped, and Settings › About gets an "Update now" button.
     // 1.2.25: every check also looks at a version already downloading (reg.installing) or waiting, so one found by
