@@ -40,7 +40,10 @@ button:disabled{opacity:.35;cursor:default}
 .lib-body{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:6px calc(var(--sr) + 16px) calc(var(--sb) + 30px) calc(var(--sl) + 16px)}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(132px,1fr));gap:16px}
 /* library sort and filter (1.2.15) */
-.libbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin:0 0 16px}
+.libbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin:0 -8px 14px;padding:6px 8px;
+  position:sticky;top:0;z-index:4;background:var(--ink)}   /* 1.2.24: stays at the top while the shelves scroll */
+.libbar .sortsel select{max-width:min(60vw,260px)}
+.libbar > .lchip{margin-left:auto}
 .sortsel{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--mute)}
 .sortsel select{min-height:44px;padding:0 34px 0 14px;border-radius:12px;border:1px solid var(--line);color:var(--text);font:600 14px system-ui,-apple-system,sans-serif;
   -webkit-appearance:none;appearance:none;background:#1c1c21 url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' fill='none' stroke='%23999' stroke-width='1.6'/%3E%3C/svg%3E") no-repeat right 12px center/11px 8px}
@@ -136,8 +139,11 @@ select.field option{color:#111;background:#fff}
 .tp.sp{background:var(--ink)}
 .tp.sp img{position:absolute;background:#fff}
 /* phone closed (1.2.6): the outer screen shows the book's cover, nothing else */
-#closed{position:fixed;left:0;right:0;top:0;height:var(--app-h,100%);z-index:200;display:flex;align-items:center;justify-content:center;perspective:1800px;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
+#closed{position:fixed;left:0;right:0;top:0;bottom:-2px;height:auto;min-height:calc(var(--app-h,100%) + 2px);z-index:200;display:flex;align-items:center;justify-content:center;perspective:1800px;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
 #closed[hidden]{display:none}
+/* 1.2.24: while the cover is simply up, what's under it isn't drawn at all, so nothing can show at an edge */
+body:has(#closed:not([hidden]):not(.turning):not(.opening)) #lib,
+body:has(#closed:not([hidden]):not(.turning):not(.opening)) #reader{visibility:hidden}
 #closed::before{content:"";position:absolute;inset:0;background:radial-gradient(120% 85% at 50% 38%,#232229,#09090b 72%);opacity:var(--bk,1)}
 #closed.turning:has(.glc) .book{visibility:hidden}
 #closed .glc{z-index:1}
@@ -306,6 +312,10 @@ textarea.copybox{width:100%;height:160px;background:var(--panel);color:var(--tex
 .glass .tabs button{border:0;background:transparent;border-radius:999px}
 .glass .tabs button.on{background:rgba(255,255,255,.16);box-shadow:inset 0 1px 0 rgba(255,255,255,.22)}
 .glass .lib-body{padding-bottom:calc(var(--sb) + 96px)}
+/* 1.2.24: the sticky sort/filter bar is glass over the shelves scrolling under it */
+.glass .libbar{background:var(--g-light),rgba(30,30,35,.52);-webkit-backdrop-filter:var(--g-fx);backdrop-filter:var(--g-fx);
+  box-shadow:var(--g-ring),var(--g-drop);border-radius:24px;top:2px}
+.glass .libbar .sortsel select{background-color:rgba(255,255,255,.07)}
 /* controls on the dark background: lit glass edge, no live blur */
 .glass .lchip,.glass .sortsel select,.glass .dk,.glass .seg,.glass .field,.glass select.field{border-color:transparent;
   background-color:rgba(255,255,255,.055);box-shadow:inset 0 1px 0 rgba(255,255,255,.14),inset 0 0 0 1px rgba(255,255,255,.07)}
@@ -315,9 +325,11 @@ textarea.copybox{width:100%;height:160px;background:var(--panel);color:var(--tex
 .glass .p-head{border-bottom:0;box-shadow:inset 0 -1px 0 rgba(255,255,255,.07)}
 /* no backdrop blur (old engines) or Reduce Transparency: the same shapes, solid */
 @supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
+  .glass .libbar{background:var(--g-light),rgba(28,28,32,.96)}
   .glass #top,.glass #pnum,.glass #boxBtn,.glass .tabs,.glass #toast,.glass #closed .tip,.glass #busy div{background:var(--g-light),rgba(28,28,32,.94)}
   .glass #sheet{background:var(--paper)}}
 @media (prefers-reduced-transparency: reduce){
+  .glass .libbar{background:#232328;-webkit-backdrop-filter:none;backdrop-filter:none}
   .glass #top,.glass #pnum,.glass #boxBtn,.glass .tabs,.glass #toast,.glass #closed .tip,.glass #busy div{background:#232328;-webkit-backdrop-filter:none;backdrop-filter:none}
   .glass #sheet{background:var(--paper);-webkit-backdrop-filter:none;backdrop-filter:none}}
 
@@ -486,9 +498,9 @@ let libSel = null, libConfirm = false;          // 1.2.16: select mode on "On th
 function sortBar(kind, sorts, sort, filters, filt, count, extra = "") {
   return `<div class="libbar">
     <label class="sortsel"><span>Sort</span><select data-${kind}sort aria-label="Sort volumes">${sorts.map(([k, l]) =>
-      `<option value="${k}"${k === sort ? " selected" : ""}>${l}</option>`).join("")}</select></label>${extra}
-    <div class="chips" role="group" aria-label="Show">${filters.map(([k, l]) =>
-      `<button class="lchip${k === filt ? " on" : ""}" data-${kind}filter="${k}" aria-pressed="${k === filt}">${l}<small>${count(k)}</small></button>`).join("")}</div></div>`;
+      `<option value="${k}"${k === sort ? " selected" : ""}>${l}</option>`).join("")}</select></label>
+    <label class="sortsel"><span>Show</span><select data-${kind}filter aria-label="Show">${filters.map(([k, l]) => { const n = count(k);
+      return `<option value="${k}" data-n="${n}"${k === filt ? " selected" : ""}>${l} · ${n}</option>`; }).join("")}</select></label>${extra}</div>`;
 }
 async function shelves(list, title, card) {         // Series view: one shelf per series, in the list's order
   const groups = [];
@@ -605,8 +617,9 @@ async function libSelAction(a) {
   renderLibrary();
 }
 $("#libBody").addEventListener("change", e => {
-  const s = e.target.closest("[data-libsort],[data-catsort]"); if (!s) return;
-  settings[s.hasAttribute("data-libsort") ? "libSort" : "catSort"] = s.value; kvSet("settings", settings); renderLibrary();
+  const s = e.target.closest("select[data-libsort],select[data-catsort],select[data-libfilter],select[data-catfilter]"); if (!s) return;
+  const key = s.hasAttribute("data-libsort") ? "libSort" : s.hasAttribute("data-catsort") ? "catSort" : s.hasAttribute("data-libfilter") ? "libFilter" : "catFilter";
+  settings[key] = s.value; kvSet("settings", settings); renderLibrary();
 });
 async function footer() {
   let s = "";
@@ -614,7 +627,7 @@ async function footer() {
   return `<div class="foot">${s}${s ? " · " : ""}Koma ${APP_VERSION}</div>`;
 }
 $("#libBody").addEventListener("click", e => {
-  const f = e.target.closest("[data-libfilter],[data-catfilter]");
+  const f = e.target.closest("button[data-libfilter],button[data-catfilter]");   // "Show all" (the bar's filter is a select)
   if (f) { if (f.dataset.libfilter) settings.libFilter = f.dataset.libfilter; else settings.catFilter = f.dataset.catfilter;
            kvSet("settings", settings); renderLibrary(); return; }
   const ls = e.target.closest("[data-libsel]"); if (ls) { libSelAction(ls.dataset.libsel); return; }
@@ -2760,7 +2773,7 @@ document.addEventListener("click", e => {
 
 /* ================= boot ================= */
 const applyGlass = () => document.documentElement.classList.toggle("glass", settings.glass !== "off");
-const APP_VERSION = "1.2.23";
+const APP_VERSION = "1.2.24";
 (async () => {
   settings = { ...DEF, ...(await kvGet("settings", {})) };
   applyGlass();
