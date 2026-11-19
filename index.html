@@ -37,13 +37,18 @@ button:disabled{opacity:.35;cursor:default}
 .lib-head{display:flex;align-items:center;gap:8px;padding:calc(var(--st) + 10px) calc(var(--sr) + 12px) 10px calc(var(--sl) + 18px)}
 .lib-head h1{flex:1;margin:0;font-size:24px;letter-spacing:-.01em;display:flex;align-items:center;gap:10px}
 .lib-head h1 b{font:700 26px/1 "Hiragino Mincho ProN","Yu Mincho",serif;color:var(--accent)}
-.lib-body{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:6px calc(var(--sr) + 16px) calc(var(--sb) + 30px) calc(var(--sl) + 16px)}
+.lib-body{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:0 calc(var(--sr) + 16px) calc(var(--sb) + 30px) calc(var(--sl) + 16px)}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(132px,1fr));gap:16px}
 /* library sort and filter (1.2.15) */
-.libbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin:0 -8px 14px;padding:6px 8px;
-  position:sticky;top:0;z-index:4;background:var(--ink)}   /* 1.2.24: stays at the top while the shelves scroll */
-.libbar .sortsel select{max-width:min(60vw,260px)}
-.libbar > .lchip{margin-left:auto}
+.libbar{display:flex;flex-wrap:nowrap;align-items:center;gap:8px 10px;margin:6px -8px 14px;padding:6px 8px;
+  position:sticky;top:0;z-index:20;background:var(--ink)}   /* 1.2.24: stays at the top while the shelves scroll */
+/* 1.2.26 (Patrick's screenshot): one row; the dropdowns share the width and shorten their text before Select wraps;
+   z-index 20 because the cards' progress bars use the shared .bar class (z-index 5) and drew over the bar */
+.libbar .sortsel{flex:1 1 0;min-width:0}
+.libbar .sortsel select{flex:1 1 auto;min-width:0;width:100%;text-overflow:ellipsis;white-space:nowrap;overflow:hidden}
+.libbar > .lchip{flex:none;margin-left:auto}
+.libbar.selbar{flex-wrap:wrap}
+@media (max-width:520px){.libbar .sortsel > span{display:none}}
 .sortsel{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--mute)}
 .sortsel select{min-height:44px;padding:0 34px 0 14px;border-radius:12px;border:1px solid var(--line);color:var(--text);font:600 14px system-ui,-apple-system,sans-serif;
   -webkit-appearance:none;appearance:none;background:#1c1c21 url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' fill='none' stroke='%23999' stroke-width='1.6'/%3E%3C/svg%3E") no-repeat right 12px center/11px 8px}
@@ -97,7 +102,7 @@ button:disabled{opacity:.35;cursor:default}
 .field{display:block;width:100%;margin:6px 0 12px;padding:11px 12px;border-radius:10px;background:var(--panel);border:1px solid var(--line);color:var(--text);font:14px/1.3 ui-monospace,monospace}
 .err{font-size:13px;background:#2a1616;border:1px solid #5a2323;color:#f3b8ad;border-radius:12px;padding:10px 12px;margin-bottom:14px}
 /* online library (1.2.1) */
-.rseg{margin:0 0 14px}
+.rseg{margin:6px 0 14px}
 .ok{color:#8fd19e}
 .olbar{display:flex;flex-direction:column;gap:8px;margin-bottom:14px}
 .olbar .field{margin:0}
@@ -313,9 +318,12 @@ textarea.copybox{width:100%;height:160px;background:var(--panel);color:var(--tex
 .glass .tabs button.on{background:rgba(255,255,255,.16);box-shadow:inset 0 1px 0 rgba(255,255,255,.22)}
 .glass .lib-body{padding-bottom:calc(var(--sb) + 96px)}
 /* 1.2.24: the sticky sort/filter bar is glass over the shelves scrolling under it */
-.glass .libbar{background:var(--g-light),rgba(30,30,35,.52);-webkit-backdrop-filter:var(--g-fx);backdrop-filter:var(--g-fx);
-  box-shadow:var(--g-ring),var(--g-drop);border-radius:24px;top:2px}
+.glass .libbar{background:var(--g-light),rgba(30,30,35,.62);-webkit-backdrop-filter:var(--g-fx);backdrop-filter:var(--g-fx);
+  box-shadow:var(--g-ring),var(--g-drop);border-radius:24px;top:0}
 .glass .libbar .sortsel select{background-color:rgba(255,255,255,.07)}
+/* 1.2.26: nothing shows above the stuck bar or through its top corners: the header's ink fades into the glass */
+.glass .libbar::before{content:"";position:absolute;z-index:-1;left:-8px;right:-8px;top:-7px;height:30px;pointer-events:none;
+  background:linear-gradient(var(--ink) 40%,rgba(14,14,16,0))}
 /* controls on the dark background: lit glass edge, no live blur */
 .glass .lchip,.glass .sortsel select,.glass .dk,.glass .seg,.glass .field,.glass select.field{border-color:transparent;
   background-color:rgba(255,255,255,.055);box-shadow:inset 0 1px 0 rgba(255,255,255,.14),inset 0 0 0 1px rgba(255,255,255,.07)}
@@ -2799,7 +2807,7 @@ document.addEventListener("click", e => {
 
 /* ================= boot ================= */
 const applyGlass = () => document.documentElement.classList.toggle("glass", settings.glass !== "off");
-const APP_VERSION = "1.2.25";
+const APP_VERSION = "1.2.26";
 (async () => {
   settings = { ...DEF, ...(await kvGet("settings", {})) };
   applyGlass();
