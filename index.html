@@ -1,5 +1,5 @@
-<!DOCTYPE html>
-<html lang="en">
+!DOCTYPE html>
+<html lang="en" class="glass">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
@@ -269,6 +269,58 @@ textarea.copybox{width:100%;height:160px;background:var(--panel);color:var(--tex
 #busy .spin{width:30px;height:30px;border:3px solid rgba(255,255,255,.15);border-top-color:var(--accent);border-radius:50%;animation:sp .8s linear infinite;margin:0 auto 12px}
 @keyframes sp{to{transform:rotate(360deg)}}
 
+/* ---------- Liquid Glass (1.2.23, Patrick) ----------
+   Koma's own CSS in the style of iOS 26's Liquid Glass; no Apple assets are used (Apple's design-resource and SF Symbols
+   licences cover native apps only). Floating capsules of frosted, colour-boosted glass with a lit top edge and a soft
+   shadow. Safari can't run an SVG filter as a backdrop filter, so the glass blurs and brightens what is behind it but
+   doesn't bend it. Only controls that float over pages or covers get a live blur; controls on the plain dark
+   background get the lit-edge look without one (blurring a flat colour costs GPU and shows nothing).
+   Settings > Screen > Glass: "Liquid Glass" (class "glass" on <html>) / "Solid" (the 1.2.22 look). */
+:root{--g-tint:rgba(30,30,35,.46);--g-tint-hi:rgba(24,24,28,.58);--g-fx:saturate(180%) blur(20px) brightness(1.04);
+  --g-light:linear-gradient(180deg,rgba(255,255,255,.16),rgba(255,255,255,.04) 42%,rgba(255,255,255,0) 70%);
+  --g-ring:inset 0 1px 0 rgba(255,255,255,.30),inset 0 -1px 0 rgba(255,255,255,.06),inset 0 0 0 1px rgba(255,255,255,.10);
+  --g-drop:0 10px 30px rgba(0,0,0,.34),0 2px 6px rgba(0,0,0,.22)}
+.glass #top,.glass #pnum,.glass #boxBtn,.glass .tabs,.glass #toast,.glass #closed .tip,.glass #busy div{
+  background:var(--g-light),var(--g-tint);-webkit-backdrop-filter:var(--g-fx);backdrop-filter:var(--g-fx);box-shadow:var(--g-ring),var(--g-drop);border:0}
+/* reader: the top bar floats as a capsule; the page number is a pill; the 読 button a glass disc */
+.glass #top{left:calc(var(--sl) + 10px);right:calc(var(--sr) + 10px);top:calc(var(--st) + 8px);padding:3px 4px;border-radius:26px;background:var(--g-light),var(--g-tint-hi)}
+.glass #reader.hide-chrome #top{transform:translateY(calc(-100% - var(--st) - 24px))}
+.glass #bottom{background:none;padding:0 calc(var(--sr) + 86px) calc(var(--sb) + 22px) calc(var(--sl) + 16px)}
+.glass #pnum{margin-left:auto;min-width:0;padding:7px 13px;border-radius:999px;color:var(--text);font-size:12.5px}
+.glass #pnum:empty{display:none}
+.glass #boxBtn{color:var(--gold);box-shadow:var(--g-ring),inset 0 0 0 1.5px rgba(242,193,78,.55),var(--g-drop)}
+.glass #boxBtn.off{color:var(--mute);box-shadow:var(--g-ring),var(--g-drop)}
+.glass .ib:active{background:rgba(255,255,255,.12)}
+/* word sheet: frosted paper (dark text stays on a light, mostly opaque tint) */
+.glass #sheet{background:linear-gradient(180deg,rgba(255,255,255,.55),rgba(255,255,255,0) 28px),rgba(247,242,232,.86);
+  -webkit-backdrop-filter:saturate(160%) blur(26px);backdrop-filter:saturate(160%) blur(26px);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.9),0 -10px 34px rgba(0,0,0,.38);border-radius:26px 26px 0 0}
+.glass .card,.glass .tl,.glass .note{background:rgba(255,255,255,.78)}
+/* toast, cover tip, busy box: dark glass */
+.glass #toast{color:var(--text);border-radius:18px;padding:10px 16px}
+.glass #closed .tip{border-radius:18px}
+.glass #busy{background:rgba(14,14,16,.55);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px)}
+.glass #busy div{border-radius:22px}
+/* library: the tab bar floats over the shelves at the bottom, like iOS 26's tab bars */
+.glass .tabs{position:absolute;z-index:3;left:50%;transform:translateX(-50%);bottom:calc(var(--sb) + 14px);padding:4px;gap:4px;border-radius:999px;width:max-content;max-width:calc(100% - 32px)}
+.glass .tabs button{border:0;background:transparent;border-radius:999px}
+.glass .tabs button.on{background:rgba(255,255,255,.16);box-shadow:inset 0 1px 0 rgba(255,255,255,.22)}
+.glass .lib-body{padding-bottom:calc(var(--sb) + 96px)}
+/* controls on the dark background: lit glass edge, no live blur */
+.glass .lchip,.glass .sortsel select,.glass .dk,.glass .seg,.glass .field,.glass select.field{border-color:transparent;
+  background-color:rgba(255,255,255,.055);box-shadow:inset 0 1px 0 rgba(255,255,255,.14),inset 0 0 0 1px rgba(255,255,255,.07)}
+.glass .lchip.on,.glass .seg button.on{background:rgba(255,255,255,.15);box-shadow:inset 0 1px 0 rgba(255,255,255,.24)}
+.glass .dk.pri{background:var(--accent);box-shadow:inset 0 1px 0 rgba(255,255,255,.35),0 4px 14px rgba(224,83,58,.35)}
+.glass .lchip.danger,.glass .confirm{background:rgba(90,35,35,.45);box-shadow:inset 0 1px 0 rgba(255,140,120,.20),inset 0 0 0 1px rgba(255,120,100,.22)}
+.glass .p-head{border-bottom:0;box-shadow:inset 0 -1px 0 rgba(255,255,255,.07)}
+/* no backdrop blur (old engines) or Reduce Transparency: the same shapes, solid */
+@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
+  .glass #top,.glass #pnum,.glass #boxBtn,.glass .tabs,.glass #toast,.glass #closed .tip,.glass #busy div{background:var(--g-light),rgba(28,28,32,.94)}
+  .glass #sheet{background:var(--paper)}}
+@media (prefers-reduced-transparency: reduce){
+  .glass #top,.glass #pnum,.glass #boxBtn,.glass .tabs,.glass #toast,.glass #closed .tip,.glass #busy div{background:#232328;-webkit-backdrop-filter:none;backdrop-filter:none}
+  .glass #sheet{background:var(--paper);-webkit-backdrop-filter:none;backdrop-filter:none}}
+
 /* ---------- touch targets (1.2.4): every control owns at least 44 x 44 pt (Apple HIG) ---------- */
 /* Small pills keep their look and get an invisible hit area around them instead of growing. */
 button,select,input,[data-vol],[data-olmanga]{touch-action:manipulation}
@@ -378,7 +430,7 @@ const kvGet = async (k, d) => { try { const r = await get("kv", k); return r ? r
 const kvSet = (k, v) => put("kv", { k, v });
 
 /* ================= state ================= */
-const DEF = { level: 3, furi: "above", dir: "rtl", boxes: true, turn: "curl", spread: "auto", coverAlone: "on", outer: "cover", outerGeo: null, libSort: "recent", libFilter: "all", catSort: "added", catFilter: "all", autoPair: "on", fill: "auto" };
+const DEF = { level: 3, furi: "above", dir: "rtl", boxes: true, turn: "curl", spread: "auto", coverAlone: "on", outer: "cover", outerGeo: null, libSort: "recent", libFilter: "all", catSort: "added", catFilter: "all", autoPair: "on", fill: "auto", glass: "on" };
 let settings = { ...DEF };
 const st = {
   vol: null, pack: null, idx: 0, n: 0, url: null,
@@ -995,8 +1047,8 @@ function titleLayout() {
   if (closedEl.classList.contains("half") !== half) { closedEl.classList.toggle("half", half); return true; }
   return false;
 }
-function komaCoverUrl() {
-  const [W, H] = komaSize(), key = W + "x" + H;
+function komaCoverUrl(size) {
+  const [W, H] = size || komaSize(), key = W + "x" + H;
   if (komaCover && komaKey === key) return komaCover;
   const k = 2, c = document.createElement("canvas"); c.width = W * k; c.height = H * k;
   const x = c.getContext("2d"); x.scale(k, k);
@@ -1016,11 +1068,11 @@ function komaCoverUrl() {
 // exact size × 2, scaled to cover and centred (a manga cover is close to the outer screen's shape, so only a thin
 // strip is trimmed). Drawn, not CSS-cropped, so the page curl's texture matches what's on screen. Cached per size.
 let volCover = "", volKey = "";
-async function volCoverUrl(vol) {
-  const [W, H] = komaSize(), key = vol.id + "|" + W + "x" + H;
+async function volCoverUrl(vol, size) {
+  const [W, H] = size || komaSize(), key = vol.id + "|" + W + "x" + H;
   if (volCover && volKey === key) return volCover;
   const src = await coverUrl(vol);
-  if (!src) return komaCoverUrl();
+  if (!src) return komaCoverUrl([W, H]);
   const im = new Image(); im.src = src;
   try { await im.decode(); } catch { return src; }
   const k = 2, c = document.createElement("canvas"); c.width = W * k; c.height = H * k;
@@ -1032,10 +1084,12 @@ async function volCoverUrl(vol) {
   return (volCover = c.toDataURL("image/jpeg", 0.92));
 }
 async function paintClosed(vol) {
-  const u = vol ? await volCoverUrl(vol) : komaCoverUrl();
+  // 1.2.23: record the size actually drawn (1.2.22 recorded the size after the awaits, so a cover drawn for one size
+  // could be labelled with another and never redrawn)
+  const size = komaSize(), u = vol ? await volCoverUrl(vol, size) : komaCoverUrl(size);
   coverBook = vol ? vol.id : "koma";
   closedEl.dataset.book = coverBook;
-  closedEl.dataset.size = komaSize().join("x");
+  closedEl.dataset.size = size.join("x");
   closedEl.classList.add("full");
   closedEl.classList.toggle("ltr", settings.dir === "ltr");
   closedEl.querySelector(".face").innerHTML = `<img src="${u}" alt=""><i class="spine"></i><i class="sheen"></i>`;
@@ -1054,6 +1108,18 @@ async function coverShow(vol) {
   if (closedEl.hidden || (vol ? vol.id : "koma") !== coverBook) { await paintClosed(vol); if (my !== closedSeq) return; }
   closedEl.hidden = false;
 }
+// 1.2.23 (Patrick's screenshot, outer screen: the cover's gold frame cut off at the top and bottom): the cover is drawn
+// at #closed's size, but #closed follows --app-h (the 100vh fill, re-measures), which can change with no resize event,
+// so a cover drawn at a stale size was shown cropped (object-fit: cover). Whenever the shown size differs from the
+// drawn size, the cover is redrawn: a ResizeObserver on #closed and the 400 ms poll; never in the middle of a turn.
+let resizeQ = 0;
+function coverResync() {
+  if (closedEl.hidden || ct || closedEl.classList.contains("turning")) return;
+  if (!closedEl.dataset.size || closedEl.dataset.size === komaSize().join("x")) return;
+  const v = bookVol();
+  if (coverBook === "koma") paintClosed(null); else if (v && v.id === coverBook) paintClosed(v);
+}
+if (window.ResizeObserver) new ResizeObserver(() => { clearTimeout(resizeQ); resizeQ = setTimeout(coverResync, 60); }).observe(closedEl);
 function coverHide() { ++closedSeq; coverUp = false; innerTitle = false; closedEl.classList.remove("half"); ctReset(); closedEl.classList.remove("opening", "hinting"); closedEl.hidden = true; }
 // The phone was opened with the cover up: the inside is simply there. (1.2.9 swung the cover open on the inner screen;
 // removed in 1.2.11 at Patrick's request, as the physical unfold already is the motion.)
@@ -1193,7 +1259,7 @@ addEventListener("orientationchange", rescreen);
 addEventListener("pageshow", rescreen);
 document.addEventListener("visibilitychange", () => { if (!document.hidden) { lastGeo = geo(); fitApp(); applyScreen(); } });
 if (window.visualViewport) visualViewport.addEventListener("resize", rescreen);
-setInterval(() => { if (document.hidden) return; fitApp(); const g = geo(); if (g !== lastGeo) { lastGeo = g; applyScreen(); } }, 400);
+setInterval(() => { if (document.hidden) return; fitApp(); const g = geo(); if (g !== lastGeo) { lastGeo = g; applyScreen(); } else coverResync(); }, 400);
 fitApp();
 
 /* ---- turning the cover (1.2.9): the same curl as a page turn (geometry, thresholds, easing, flick), drawn over the
@@ -2252,11 +2318,12 @@ async function renderRepo() {
   }
   if (repoView === "online") return renderOnline();
   if (!repoIndex && !repoErr) { body.innerHTML = repoSeg() + `<div class="empty"><p>Loading ${esc(repo.name)}…</p></div>`; await loadRepoIndex(); }
+  if (!repo) return;                                    // removed (Settings) while the catalogue was loading
   if (libTab !== "repo" || repoView !== "catalogue") return;
   const local = new Map();
   for (const lv of await all("volumes")) { local.set(lv.id, lv.id); if (lv.repoId) local.set(lv.repoId, lv.id); }
   const head = repoSeg() + `<div class="rhead"><span><b>${esc(repo.name)}</b>${repoIndex ? ` · ${repoIndex.volumes.length} volume${repoIndex.volumes.length === 1 ? "" : "s"}` : ""}</span>
-    <button class="dk" data-repo="refresh">Refresh</button><button class="dk" data-repo="remove">Remove</button></div>`;
+    <button class="dk" data-repo="refresh">Refresh</button></div>`;
   if (repoErr) { body.innerHTML = head + `<div class="err">${esc(repoErr)}</div>`; return; }
   const allRepo = repoIndex.volumes;
   if (!allRepo.length) { body.innerHTML = head + `<div class="empty"><p>The repository is empty. Volumes appear here once the laptop finishes processing them.</p></div>`; return; }
@@ -2634,7 +2701,11 @@ async function openSettings() {
       <div class="grp"><h3>Volumes on this device</h3>
         ${vols.length ? vols.map(v => `<div class="vrow"><div style="flex:1"><div class="vg">${esc(v.title)}</div><div class="vr">${v.pageCount} pages · ${fmtBytes(v.bytes || 0)} · ${v.hasPack ? "readings" : "no readings"}</div></div><button class="dk danger" data-delvol="${esc(v.id)}">Remove</button></div>`).join("") : `<p>None yet.</p>`}
         <p>${persisted === true ? "Storage is protected from automatic clean-up." : "Keep Koma on your Home Screen so iOS doesn't clear its storage."}</p></div>
-      <div class="grp"><h3>Screen</h3>${seg("fill", [["auto", "Fill the screen"], ["off", "Use the window"]])}<p>In the Home Screen app, iOS sometimes reports a window shorter than the screen and leaves a dark band at the bottom. "Fill the screen" lays Koma out to the full screen height instead. If pages ever look cut off at the bottom, choose "Use the window" and tell Claude.</p></div>
+      <div class="grp"><h3>Repository</h3>${repo
+          ? `<p>${esc(repo.name || "Repository")}<br><span style="word-break:break-all">${esc(repo.url)}</span></p><p><button class="dk danger" data-p="repo-remove">Remove repository</button> Removes the link from this phone only. Volumes you downloaded stay; the laptop keeps everything.</p>`
+          : `<p>None. Add one in Library › Repository.</p>`}</div>
+      <div class="grp"><h3>Screen</h3>${seg("fill", [["auto", "Fill the screen"], ["off", "Use the window"]])}<p>In the Home Screen app, iOS sometimes reports a window shorter than the screen and leaves a dark band at the bottom. "Fill the screen" lays Koma out to the full screen height instead. If pages ever look cut off at the bottom, choose "Use the window" and tell Claude.</p>
+        ${seg("glass", [["on", "Liquid Glass"], ["off", "Solid"]])}<p>Liquid Glass: the reader's bars, the page number, the 読 button, the word sheet and the library's tab bar float as frosted glass over the pages. Solid: the previous look, a little lighter on the battery.</p></div>
       <div class="grp"><h3>About</h3><p>Koma ${APP_VERSION}. Everything is stored on this device and works with no connection.</p><p id="scrInfo">${screenInfo()}</p><p id="scrLog">${modeLog.length ? "Recent: " + esc(modeLog.join(" · ")) : ""}</p>
         ${updateWorker ? `<p><button class="dk pri" data-p="update">Update now</button> A new version is downloaded and ready.</p>` : ""}</div>
     </div>`;
@@ -2647,6 +2718,7 @@ panel.addEventListener("click", async e => {
     openSettings(); if (!reader.hidden) { updateChrome(); if (st.sheet) renderSheet(); }
     if (["spread", "coverAlone", "dir", "outer", "autoPair"].includes(k)) applyScreen(true);
     if (k === "fill") fitApp();
+    if (k === "glass") applyGlass();
     if (k === "outer") { if (coverMode()) coverShow(); else if (!closedEl.hidden) coverHide(); }
     return;
   }
@@ -2660,6 +2732,11 @@ panel.addEventListener("click", async e => {
   const p = e.target.closest("[data-p]"); if (!p) return;
   if (p.dataset.p === "close") { panel.hidden = true; if (st.sheet) renderSheet(); }
   else if (p.dataset.p === "update") applyUpdate();
+  else if (p.dataset.p === "repo-remove") {
+    // 1.2.23 (Patrick removed his repository by accident from the catalogue header): now in Settings, two taps
+    if (p.dataset.confirm !== "1") { p.dataset.confirm = "1"; p.textContent = "Tap again to remove"; return; }
+    await repoAction("remove"); openSettings(); toast("Repository removed. Add it again in Library › Repository.");
+  }
   else if (p.dataset.p === "outer-set" || p.dataset.p === "outer-forget") {
     const set = p.dataset.p === "outer-set";
     settings.outerGeo = set ? outerGeoNow() : null; kvSet("settings", settings);
@@ -2682,9 +2759,11 @@ document.addEventListener("click", e => {
 });
 
 /* ================= boot ================= */
-const APP_VERSION = "1.2.22";
+const applyGlass = () => document.documentElement.classList.toggle("glass", settings.glass !== "off");
+const APP_VERSION = "1.2.23";
 (async () => {
   settings = { ...DEF, ...(await kvGet("settings", {})) };
+  applyGlass();
   st.vocab = await kvGet("vocab", []);
   repoView = await kvGet("repoView", "catalogue");
   ol.src = await kvGet("olSrc", "library");
