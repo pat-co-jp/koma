@@ -151,12 +151,21 @@ select.field option{color:#111;background:#fff}
 .stick > .olbar select.field{flex:0 1 auto;min-width:120px;max-width:340px;min-height:44px;padding-top:0;padding-bottom:0;text-overflow:ellipsis;white-space:nowrap;overflow:hidden}
 .stick > .olbar .seg{flex:0 0 auto}
 .stick > .olbar .seg button{flex:none}
-.stick > .olbar .olsearch{flex:1 1 100%}
+
 #lib.repo #libBody,.p-body.pull{overscroll-behavior-y:none}   /* the pull replaces the rubber band (swipe down to refresh) */
 .hgrp{display:contents}
 /* 1.2.33: Popular / Latest / Search buttons a little narrower, so the switch and the source bar share one line on the
    inner screen (portrait in the shelves, landscape in the header row) */
-.stick > .olbar .seg button{padding:9px 12px}
+.stick > .olbar{position:relative}
+.stick > .olbar select#olMode{flex:none;min-height:44px;padding-top:0;padding-bottom:0}
+/* the search field floats below the bar, left-aligned with it, without changing the bar */
+.olpop{position:absolute;z-index:5;left:0;top:calc(100% + 8px);width:max(100%,340px);max-width:calc(100vw - 32px);margin:0;
+  display:flex;gap:8px;padding:5px 8px;border-radius:16px;background:var(--ink);box-shadow:0 10px 30px rgba(0,0,0,.4)}
+.olpop .field{margin:0}
+#lib.olsearching #olHead{margin-top:66px}
+#lib.headbar .lib-head{position:relative;z-index:25}
+.hmid .libbar .sortsel > span{display:none}            /* 1.2.34: the header row is tight in portrait */
+.hmid .stick > .rseg button{padding:9px 13px}
 /* 1.2.33 (Patrick): the Catalogue and the Online Library lay out the same way: where the shelves are narrower than
    both capsules need on one line (the outer screen), the switch sits above the bar, left-aligned, in both views */
 #libBody{container-type:inline-size}
@@ -168,7 +177,7 @@ select.field option{color:#111;background:#fff}
 #lib.headbar .lib-head .hmid{display:flex;flex:1 1 auto;min-width:0;align-items:center;margin:0 14px 0 22px}
 .hmid .stick{position:static;margin:0;max-width:100%;flex-wrap:nowrap}   /* 1.2.33: always one line in the header row */
 .hmid .stick > .olbar{flex-wrap:nowrap}
-.hmid .stick > .olbar .olsearch{flex:1 1 180px;min-width:150px}
+
 .hmid .stick > .libbar{flex:0 1 auto;min-width:0}
 .hmid > .libbar{position:static;margin:0;max-width:100%}
 .hmid .selbar{flex-direction:row;align-items:center}
@@ -404,6 +413,7 @@ textarea.copybox{width:100%;height:160px;background:var(--panel);color:var(--tex
 .glass .olbar select.field{border-radius:999px;background-color:rgba(255,255,255,.07)}
 .glass .olsearch .field{border-radius:999px}
 .glass .olsearch .dk{border-radius:999px}
+.glass .olpop{background:var(--g-light),rgba(30,30,35,.8);-webkit-backdrop-filter:var(--g-fx);backdrop-filter:var(--g-fx);box-shadow:var(--g-ring),var(--g-drop);border-radius:27px}
 .glass #ptr.go{color:var(--gold)}
 /* panels: back / close in discs, the title in a capsule, floating over the page as it scrolls */
 html.glass .p-head{position:absolute;z-index:3;left:calc(var(--sl) + 10px + var(--cl,0px));right:calc(var(--sr) + 10px + var(--cr,0px));
@@ -733,7 +743,8 @@ async function volCard(v) {
       <div class="bar"><i style="width:${v.lastReadAt ? pct : 0}%"></i></div></button>`;
 }
 async function renderLibrary() {
-  $("#lib").classList.toggle("repo", libTab === "repo");      // 1.2.30: swipe down to refresh there
+  $("#lib").classList.toggle("repo", libTab === "repo");
+  if (libTab !== "repo" || repoView !== "online") $("#lib").classList.remove("olsearching");      // 1.2.30: swipe down to refresh there
   if (libTab === "repo") return renderRepo();
   const allVols = await all("volumes");
   const body = $("#libBody");
@@ -1465,13 +1476,23 @@ function fitApp() {
 // The inner screen: a taught outer screen, or (untaught) the Duo's tell, a window much larger than what `screen` reports.
 function chromeInsets() {
   const de = document.documentElement;
+  let stProbe = chromeInsets.probe;                     // created on first use (fitApp runs before this point in the file)
+  if (!stProbe) {
+    stProbe = chromeInsets.probe = document.createElement("div");
+    stProbe.style.cssText = "position:absolute;left:0;top:0;width:0;visibility:hidden;pointer-events:none;padding-top:env(safe-area-inset-top,0px)";
+    document.body.appendChild(stProbe);
+  }
   const duo = foldable() || Math.max(innerWidth, innerHeight) > Math.max(screen.width, screen.height) * 1.2;
   const inner = duo && screenMode !== "cover", outer = duo && screenMode === "cover";
   const land = innerWidth > innerHeight;
   // 1.2.31 (Patrick's outer-screen screenshot 12:20): iOS keeps the status column out of the page there (a right safe
   // area of about 85 pt), but the camera's pixels sit just inside it at the top and touched the library's button capsule.
   // On the outer screen the floating controls keep another 20 pt from the right.
-  const v = { "--cl": inner ? "14px" : "", "--cr": inner ? (land ? "102px" : "174px") : outer ? "20px" : "", "--ct": inner ? "6px" : "" };
+  // 1.2.34 (Patrick's portrait screenshots 15:57-16:00): in portrait iOS reports a top safe area of about 88 pt that
+  // holds the status overlay, so everything already starts below it and needs no right reserve; the buttons capsule
+  // sits at the right edge, directly below the status icons. The 174 pt reserve stays for a portrait window without it.
+  const stTop = parseFloat(getComputedStyle(stProbe).paddingTop) || 0;
+  const v = { "--cl": inner ? "14px" : "", "--cr": inner ? (land ? "102px" : stTop >= 60 ? "" : "174px") : outer ? "20px" : "", "--ct": inner ? "6px" : "" };
   for (const k in v) if (de.style.getPropertyValue(k) !== v[k]) { if (v[k]) de.style.setProperty(k, v[k]); else de.style.removeProperty(k); }
   de.classList.toggle("duo-inner", inner);
 }
@@ -1484,7 +1505,7 @@ if (window.visualViewport) visualViewport.addEventListener("resize", rescreen);
 // 1.2.32: on a wide screen the bar of a freshly drawn list moves into the header row (placeBar); events are handled on
 // #lib, so it works in either place. Only a full redraw counts (moving the bar out is itself a change of #libBody).
 const libBodyEl = document.getElementById("libBody"), hmid = document.querySelector(".lib-head .hmid");
-const headWide = () => innerWidth >= 1000 && innerWidth > innerHeight;
+const headWide = () => innerWidth >= 860;      // 1.2.34: the inner screen in portrait (892 pt) too
 function placeBar() {
   const wide = headWide();
   $("#lib").classList.toggle("headbar", wide);
@@ -2758,6 +2779,7 @@ function olHeadHTML() {
 }
 async function renderOnline() {
   const body = $("#libBody"), seg = repoSeg();
+  $("#lib").classList.toggle("olsearching", !!(ol.mode === "SEARCH" && ol.src !== "library"));   // 1.2.34: room under the floating field
   const here = () => libTab === "repo" && repoView === "online" && !$("#lib").hidden;
   if (!navigator.onLine) { body.innerHTML = seg + `<div class="err">${esc(olMsg({ kind: "offline" }))}</div>`; return; }
   if (!ol.status && !ol.err) {
@@ -2772,9 +2794,11 @@ async function renderOnline() {
   const opts = `<option value="library"${ol.src === "library" ? " selected" : ""}>My Suwayomi library</option>` +
     ol.sources.map(s => `<option value="${esc(s.id)}"${s.id === ol.src ? " selected" : ""}>${esc(s.name)}` +
       `${s.lang && s.lang !== "localsourcelang" ? " · " + esc(s.lang.toUpperCase()) : ""}${s.nsfw ? " · 18+" : ""}</option>`).join("");
-  const modes = src ? `<div class="seg">${[["POPULAR", "Popular"], ...(src.latest ? [["LATEST", "Latest"]] : []), ["SEARCH", "Search"]]
-    .map(([m, l]) => `<button data-olmode="${m}" class="${ol.mode === m ? "on" : ""}">${l}</button>`).join("")}</div>` : "";
-  const search = src && ol.mode === "SEARCH" ? `<form id="olForm" class="olsearch"><input class="field" id="olQ" type="search" enterkeyhint="search"
+  // 1.2.34 (Patrick): Popular / Latest / Search is a dropdown, and the search field pops up below the bar (.olpop)
+  // instead of growing it
+  const modes = src ? `<select class="field" id="olMode" aria-label="List">${[["POPULAR", "Popular"], ...(src.latest ? [["LATEST", "Latest"]] : []), ["SEARCH", "Search"]]
+    .map(([m, l]) => `<option value="${m}"${ol.mode === m ? " selected" : ""}>${l}</option>`).join("")}</select>` : "";
+  const search = src && ol.mode === "SEARCH" ? `<form id="olForm" class="olsearch olpop"><input class="field" id="olQ" type="search" enterkeyhint="search"
       placeholder="Search ${esc(src.name)}" value="${esc(typed ?? ol.q)}" autocapitalize="off" autocorrect="off" spellcheck="false"><button class="dk pri">Search</button></form>` : "";
   let list;
   if (ol.listErr) list = `<div class="err">${esc(ol.listErr)}</div><button class="dk" data-ol="reload">Try again</button>`;
@@ -2813,6 +2837,11 @@ $("#lib").addEventListener("click", e => {
   if (mg) openManga(+mg.dataset.olmanga);
 });
 $("#lib").addEventListener("change", e => {
+  if (e.target.id === "olMode") {                      // 1.2.34: the list dropdown
+    ol.mode = e.target.value; ol.q = ""; olReset(false); renderOnline();
+    if (ol.mode === "SEARCH") setTimeout(() => $("#olQ") && $("#olQ").focus(), 60);
+    return;
+  }
   if (e.target.id !== "olSrc") return;
   ol.src = e.target.value; ol.mode = "POPULAR"; ol.q = ""; kvSet("olSrc", ol.src); olReset(false); renderOnline();
 });
@@ -3125,7 +3154,7 @@ document.addEventListener("click", e => {
 
 /* ================= boot ================= */
 const applyGlass = () => document.documentElement.classList.toggle("glass", settings.glass !== "off");
-const APP_VERSION = "1.2.33";
+const APP_VERSION = "1.2.34";
 (async () => {
   settings = { ...DEF, ...(await kvGet("settings", {})) };
   applyGlass();
