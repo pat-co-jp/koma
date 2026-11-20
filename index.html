@@ -135,6 +135,27 @@ select.field option{color:#111;background:#fff}
 .chb.have{background:rgba(242,193,78,.14);color:var(--gold)}
 .chb.fail{background:#2a1616;color:#ff8a7a;border:1px solid #5a2323}
 .p-head h2{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* 1.2.30 (Patrick): on the Repository the Catalogue / Online library switch and the sort, filter and source controls
+   float together at the top while the list scrolls under them (.stick); the gaps between them pass taps through. */
+.stick{position:sticky;top:10px;z-index:20;display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:0 0 14px -8px;
+  max-width:calc(100% + 8px);pointer-events:none}
+.stick > *{pointer-events:auto}
+.stick > .libbar{position:static;margin:0;max-width:100%}
+.stick > .rseg{flex:0 0 auto;margin:0}
+.stick > .rseg button{flex:none;padding:9px 16px}
+.stick > .olbar{flex:0 1 auto;max-width:100%;margin:0;flex-direction:row;flex-wrap:wrap;align-items:center;padding:6px 8px;background:var(--ink);border-radius:16px}
+.stick > .olbar select.field{flex:1 1 200px;width:auto;max-width:340px;min-height:44px;padding-top:0;padding-bottom:0}
+.stick > .olbar .seg{flex:0 0 auto}
+.stick > .olbar .seg button{flex:none;padding:9px 14px}
+.stick > .olbar .olsearch{flex:1 1 100%}
+#lib.repo #libBody,.p-body.pull{overscroll-behavior-y:none}   /* the pull replaces the rubber band (swipe down to refresh) */
+.hgrp{display:contents}
+/* swipe down to refresh (1.2.30) */
+#ptr{position:fixed;z-index:50;left:0;top:0;width:40px;height:40px;margin-left:-20px;border-radius:50%;display:grid;place-items:center;
+  opacity:0;pointer-events:none;background:#232328;color:var(--text);box-shadow:0 4px 14px rgba(0,0,0,.4)}
+#ptr svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+#ptr.go{color:var(--gold)}
+#ptr.spin svg{animation:sp .8s linear infinite}
 
 /* ---------- reader ---------- */
 #reader{position:fixed;left:0;right:0;top:0;height:var(--app-h,100%);z-index:20;background:var(--ink)}
@@ -345,6 +366,54 @@ textarea.copybox{width:100%;height:160px;background:var(--panel);color:var(--tex
   .glass .libbar{background:#232328;-webkit-backdrop-filter:none;backdrop-filter:none}
   .glass #top,.glass #pnum,.glass #boxBtn,.glass .tabs,.glass #toast,.glass #closed .tip,.glass #busy div{background:#232328;-webkit-backdrop-filter:none;backdrop-filter:none}
   .glass #sheet{background:var(--paper);-webkit-backdrop-filter:none;backdrop-filter:none}}
+/* 1.2.30 (Patrick): the same glass on the Repository, the Online Library and the panels (Settings, Saved words, a series).
+   Floating pieces get a live blur: the Repository's switch and source bar, the panels' header pieces, the refresh disc.
+   Cards' badges and buttons get the lit edge without a blur (dozens of blurs in a scrolling grid cost frames on a phone). */
+.glass .stick > .rseg,.glass .stick > .olbar,.glass #ptr,html.glass .p-head > .ib,html.glass .p-head > h2{
+  background:var(--g-light),rgba(30,30,35,.74);-webkit-backdrop-filter:var(--g-fx);backdrop-filter:var(--g-fx);box-shadow:var(--g-ring),var(--g-drop);border:0}
+.glass .stick > .rseg{border-radius:999px;padding:4px;gap:4px}
+.glass .stick > .rseg button{border-radius:999px}
+.glass .stick > .rseg button.on,.glass .olbar .seg button.on{background:rgba(255,255,255,.16);box-shadow:inset 0 1px 0 rgba(255,255,255,.22)}
+.glass .stick > .olbar{border-radius:26px}
+.glass .olbar .seg{border-radius:999px;padding:3px;background-color:rgba(255,255,255,.07)}
+.glass .olbar .seg button{border-radius:999px}
+.glass .olbar select.field{border-radius:999px;background-color:rgba(255,255,255,.07)}
+.glass .olsearch .field{border-radius:999px}
+.glass .olsearch .dk{border-radius:999px}
+.glass #ptr.go{color:var(--gold)}
+/* panels: back / close in discs, the title in a capsule, floating over the page as it scrolls */
+html.glass .p-head{position:absolute;z-index:3;left:calc(var(--sl) + 10px + var(--cl,0px));right:calc(var(--sr) + 10px + var(--cr,0px));
+  top:calc(var(--st) + 8px + var(--ct,0px));padding:0;border:0;box-shadow:none;background:none;
+  display:grid;grid-template-columns:1fr minmax(0,max-content) 1fr;align-items:center;gap:10px;pointer-events:none}
+html.glass .p-head > *{pointer-events:auto}
+html.glass .p-head > h2{grid-column:2;grid-row:1;justify-self:center;max-width:100%;box-sizing:border-box;height:50px;line-height:50px;
+  padding:0 20px;border-radius:999px;font-size:16px;flex:none}
+html.glass .p-head > .ib{width:50px;height:50px;border-radius:50%}
+html.glass .p-head > .ib:first-child{grid-column:1;grid-row:1;justify-self:start}
+html.glass .p-head > h2 ~ .ib{grid-column:3;grid-row:1;justify-self:end}
+html.glass .p-body{padding-top:calc(var(--st) + var(--ct,0px) + 74px)}
+html.glass #panel::before{content:"";position:absolute;z-index:2;left:0;right:0;top:0;height:calc(var(--st) + var(--ct,0px) + 16px);
+  background:linear-gradient(var(--ink),rgba(14,14,16,0));pointer-events:none}
+/* library header: the three buttons share one glass capsule */
+.glass .lib-head .hgrp{display:flex;align-items:center;gap:2px;padding:3px 5px;border-radius:999px;
+  background:var(--g-light),rgba(255,255,255,.04);box-shadow:inset 0 1px 0 rgba(255,255,255,.14),inset 0 0 0 1px rgba(255,255,255,.07)}
+.glass .lib-head .hgrp .ib{border-radius:50%}
+/* cards: lit edges, no blur */
+.glass .badge{background:rgba(20,20,24,.72);box-shadow:inset 0 1px 0 rgba(255,255,255,.18),inset 0 0 0 1px rgba(255,255,255,.08)}
+.glass .get{box-shadow:inset 0 1px 0 rgba(255,255,255,.32),0 2px 8px rgba(0,0,0,.35)}
+.glass .get.have,.glass .get.busy{background:rgba(20,20,24,.74);box-shadow:inset 0 1px 0 rgba(255,255,255,.2),inset 0 0 0 1px rgba(255,255,255,.08),0 2px 8px rgba(0,0,0,.35)}
+.glass .get.raw{background:rgba(47,47,54,.86);border-color:transparent;box-shadow:inset 0 1px 0 rgba(255,255,255,.22),inset 0 0 0 1px rgba(255,255,255,.1),0 2px 8px rgba(0,0,0,.35)}
+.glass .chb{box-shadow:inset 0 1px 0 rgba(255,255,255,.3)}
+.glass .chb.busy,.glass .chb.have{box-shadow:inset 0 1px 0 rgba(255,255,255,.16),inset 0 0 0 1px rgba(255,255,255,.07)}
+.glass .chrow{border-bottom-color:rgba(255,255,255,.07)}
+.glass .err{border-color:transparent;box-shadow:inset 0 1px 0 rgba(255,140,120,.20),inset 0 0 0 1px rgba(255,120,100,.22)}
+.glass .vol .cv{border-color:transparent;box-shadow:inset 0 0 0 1px rgba(255,255,255,.08)}
+.glass .mcv{border-color:transparent}
+.glass .empty .big{border-radius:999px;box-shadow:inset 0 1px 0 rgba(255,255,255,.35),0 4px 14px rgba(224,83,58,.35)}
+@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
+  .glass .stick > .rseg,.glass .stick > .olbar,.glass #ptr,html.glass .p-head > .ib,html.glass .p-head > h2{background:var(--g-light),rgba(28,28,32,.96)}}
+@media (prefers-reduced-transparency: reduce){
+  .glass .stick > .rseg,.glass .stick > .olbar,.glass #ptr,html.glass .p-head > .ib,html.glass .p-head > h2{background:#232328;-webkit-backdrop-filter:none;backdrop-filter:none}}
 /* 1.2.29 (Patrick): the reader's top bar is three pieces of glass: the back button alone in a disc on the left, the title
    in a capsule only as wide as its text (centred), and the page controls in their own capsule on the right. The space
    between them is open, so a tap there reaches the page. --cl / --cr / --ct keep them clear of the Duo inner screen's
@@ -371,7 +440,7 @@ html.glass #top .tgrp .ib{border-radius:50%}
 button,select,input,[data-vol],[data-olmanga]{touch-action:manipulation}
 .ib{width:44px;height:44px}
 .ib svg{width:23px;height:23px}
-.lib-head{gap:4px;padding-right:calc(var(--sr) + 8px)}
+.lib-head{gap:4px;padding-right:calc(var(--sr) + 8px + var(--cr,0px));padding-top:calc(var(--st) + 12px + var(--ct,0px))}   /* 1.2.30: clear of the Duo's status overlay */
 .tabs{gap:8px}
 .tabs button{min-height:44px;padding:10px 18px;font-size:15px}
 .dk{min-height:44px;padding:10px 16px;font-size:15px;justify-content:center}
@@ -399,9 +468,11 @@ button,select,input,[data-vol],[data-olmanga]{touch-action:manipulation}
 <section id="lib">
   <div class="lib-head">
     <h1><b>読</b>Koma</h1>
+    <div class="hgrp">
     <button class="ib" data-act="import" aria-label="Import"><svg viewBox="0 0 24 24"><path d="M12 4v11M7 10l5 5 5-5M5 19h14"/></svg></button>
     <button class="ib" data-act="vocab" aria-label="Saved words"><svg viewBox="0 0 24 24"><path d="M6 3h12v18l-6-4-6 4z"/></svg></button>
     <button class="ib" data-act="settings" aria-label="Settings"><svg viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg></button>
+  </div>
   </div>
   <div class="tabs"><button class="on" data-tab="device">On this phone</button><button data-tab="repo">Repository</button></div>
   <div class="lib-body" id="libBody"></div>
@@ -637,6 +708,7 @@ async function volCard(v) {
       <div class="bar"><i style="width:${v.lastReadAt ? pct : 0}%"></i></div></button>`;
 }
 async function renderLibrary() {
+  $("#lib").classList.toggle("repo", libTab === "repo");      // 1.2.30: swipe down to refresh there
   if (libTab === "repo") return renderRepo();
   const allVols = await all("volumes");
   const body = $("#libBody");
@@ -2480,11 +2552,12 @@ async function renderRepo() {
   if (libTab !== "repo" || repoView !== "catalogue") return;
   const local = new Map();
   for (const lv of await all("volumes")) { local.set(lv.id, lv.id); if (lv.repoId) local.set(lv.repoId, lv.id); }
-  const head = `<div class="libfade" aria-hidden="true"></div>` + repoSeg() + `<div class="rhead"><span><b>${esc(repo.name)}</b>${repoIndex ? ` · ${repoIndex.volumes.length} volume${repoIndex.volumes.length === 1 ? "" : "s"}` : ""}</span>
-    <button class="dk" data-repo="refresh">Refresh</button></div>`;
-  if (repoErr) { body.innerHTML = head + `<div class="err">${esc(repoErr)}</div>`; return; }
+  // 1.2.30: the switch and the sort/filter bar float together (.stick); Refresh became swipe down to refresh
+  const head = (bar = "") => `<div class="libfade" aria-hidden="true"></div><div class="stick">${repoSeg()}${bar}</div>` +
+    `<div class="rhead"><span><b>${esc(repo.name)}</b>${repoIndex ? ` · ${repoIndex.volumes.length} volume${repoIndex.volumes.length === 1 ? "" : "s"}` : ""}</span></div>`;
+  if (repoErr) { body.innerHTML = head() + `<div class="err">${esc(repoErr)}</div>`; return; }
   const allRepo = repoIndex.volumes;
-  if (!allRepo.length) { body.innerHTML = head + `<div class="empty"><p>The repository is empty. Volumes appear here once the laptop finishes processing them.</p></div>`; return; }
+  if (!allRepo.length) { body.innerHTML = head() + `<div class="empty"><p>The repository is empty. Volumes appear here once the laptop finishes processing them.</p></div>`; return; }
   const cs = CAT_SORTS.some(x => x[0] === settings.catSort) ? settings.catSort : "added";
   const cf = CAT_FILTERS.some(x => x[0] === settings.catFilter) ? settings.catFilter : "all";
   const catMatch = (v, f) => f === "all" || (f === "missing" ? !local.has(v.id) : f === "phone" ? local.has(v.id) : repoState(v) === f);
@@ -2516,7 +2589,7 @@ async function renderRepo() {
     : cs === "series" ? await shelves(vols, v => ({ title: v.title }), repoCard)
     : `<div class="grid">${(await Promise.all(vols.map(repoCard))).join("")}</div>`;
   if (libTab !== "repo" || repoView !== "catalogue") return;
-  body.innerHTML = head + bar + grid + await footer();
+  body.innerHTML = head(bar) + grid + await footer();
   scheduleLive();
 }
 async function repoAction(a) {
@@ -2670,8 +2743,8 @@ async function renderOnline() {
       return `<button class="vol" data-olmanga="${+m.id}"><div class="cv">${u ? `<img class="olimg" src="${esc(u)}" alt="" loading="lazy">` : ""}</div>` +
         `${m.inLibrary && ol.src !== "library" ? `<span class="badge">In library</span>` : ""}<div class="t">${esc(m.title)}</div></button>`;
     }).join("")}</div>${ol.hasNext ? `<button class="dk olmore" data-ol="more"${ol.loading ? " disabled" : ""}>${ol.loading ? "Loading…" : "Load more"}</button>` : ""}`;
-  body.innerHTML = seg + `<div class="rhead" id="olHead">${olHeadHTML()}<button class="dk" data-ol="reconnect">Refresh</button></div>
-    <div class="olbar"><select class="field" id="olSrc" aria-label="Source">${opts}</select>${modes}${search}</div>${list}
+  body.innerHTML = `<div class="libfade" aria-hidden="true"></div><div class="stick">${seg}<div class="olbar"><select class="field" id="olSrc" aria-label="Source">${opts}</select>${modes}${search}</div></div>
+    <div class="rhead" id="olHead">${olHeadHTML()}</div>${list}
     <p class="olnote">Tap a series for its chapters. Download sends a chapter to your laptop: it appears under Catalogue as Processing on PC, and readings attach when the PC finishes.</p>`;
 }
 document.addEventListener("error", e => { if (e.target && e.target.classList && e.target.classList.contains("olimg")) e.target.remove(); }, true);
@@ -2750,7 +2823,7 @@ function paintManga() {
   if (!ol.manga || panel.hidden) return;
   const d = ol.manga.data, m = d && d.manga;
   const head = `<div class="p-head"><button class="ib" data-p="close" aria-label="Back"><svg viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg></button>
-    <h2>${esc(m ? m.title : "Series")}</h2>${m ? `<button class="ib" data-olm="refresh" aria-label="Check the source for new chapters"><svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"/></svg></button>` : ""}</div>`;
+    <h2>${esc(m ? m.title : "Series")}</h2></div>`;          // 1.2.30: swipe down to check the source for new chapters
   if (!m) {
     panel.innerHTML = head + `<div class="p-body">${ol.mangaErr ? `<div class="err">${esc(ol.mangaErr)}</div><button class="dk" data-olm="retry">Try again</button>`
       : `<p style="color:var(--mute)">Fetching chapters from the source…</p>`}</div>`;
@@ -2758,7 +2831,7 @@ function paintManga() {
   }
   const meta = [m.author, m.artist && m.artist !== m.author ? m.artist : "", MSTATUS[m.status] || "", m.source].filter(Boolean).map(esc).join(" · ");
   const shown = shownChapters(), total = d.chapters.length, u = apiImg(m.thumb);
-  panel.innerHTML = head + `<div class="p-body">
+  panel.innerHTML = head + `<div class="p-body pull">
     <div class="mhead">${u ? `<img class="mcv olimg" src="${esc(u)}" alt="">` : `<div class="mcv"></div>`}
       <div><div class="mt">${esc(m.title)}</div>${meta ? `<div class="vr">${meta}</div>` : ""}${m.genres.length ? `<div class="vr">${esc(m.genres.slice(0, 8).join(", "))}</div>` : ""}</div></div>
     ${m.description ? `<div class="mdesc${ol.descOpen ? " open" : ""}" data-olm="desc">${esc(m.description)}</div>` : ""}
@@ -2811,10 +2884,99 @@ panel.addEventListener("click", e => {
   }
   const b = e.target.closest("[data-olm]"); if (!b || !ol.manga) return;
   const a = b.dataset.olm;
-  if (a === "refresh" || a === "retry") openManga(ol.manga.id, a === "refresh");
+  if (a === "retry") openManga(ol.manga.id, false);
   else if (a === "order") { ol.order = ol.order === "new" ? "old" : "new"; paintManga(); }
   else if (a === "all") { ol.showAll = true; paintManga(); }
   else if (a === "desc") { ol.descOpen = !ol.descOpen; b.classList.toggle("open", ol.descOpen); }
+});
+
+/* ---- swipe down to refresh (1.2.30, Patrick: replaces the Refresh buttons) ----
+   Catalogue: reads the laptop's catalogue again. Online Library: reconnects and reloads the list. A series: asks the
+   source for new chapters. Pull from the top of the list: the list follows the finger with resistance, the arrow turns
+   gold past 64 pt, and letting go refreshes (the spinner stays until it's done). The list's own rubber band is off
+   there (overscroll-behavior), so the pull feels the same on every engine. What's on screen stays until the new
+   content arrives. */
+const ptr = document.createElement("div");
+ptr.id = "ptr"; ptr.setAttribute("aria-hidden", "true");
+ptr.innerHTML = `<svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"/></svg>`;
+document.body.appendChild(ptr);
+const PTR_GO = 64, PTR_MAX = 110, PTR_HOLD = 56;
+let ptrBusy = false;
+function ptrPaint(g, pull) {
+  g.sc.style.transform = pull > 0 ? `translateY(${pull.toFixed(1)}px)` : "";
+  const r = g.sc.getBoundingClientRect();
+  ptr.style.left = (r.left + r.width / 2) + "px";
+  ptr.style.top = (g.top + pull / 2 - 20) + "px";
+  ptr.style.opacity = Math.min(1, pull / 40).toFixed(2);
+  if (!ptr.classList.contains("spin")) ptr.firstChild.style.transform = `rotate(${Math.round(pull / PTR_GO * 270)}deg)`;
+}
+function pullToRefresh(root, pick) {
+  let g = null;
+  const end = async () => {
+    const x = g; g = null;
+    if (!x || !x.on) return;
+    x.sc.style.transition = "transform .2s ease";
+    if (x.pull >= PTR_GO) {
+      ptrBusy = true; ptr.classList.add("spin"); ptr.firstChild.style.transform = "";
+      ptrPaint(x, PTR_HOLD);
+      const t0 = performance.now();
+      try { await x.run(); } catch (e) { console.warn("refresh", e); }
+      const wait = 450 - (performance.now() - t0);
+      if (wait > 0) await new Promise(r => setTimeout(r, wait));
+      ptrBusy = false;
+    }
+    ptr.classList.remove("spin", "go");
+    ptrPaint(x, 0); ptr.style.opacity = "0";
+    setTimeout(() => { if (!g) x.sc.style.transition = ""; }, 240);
+  };
+  root.addEventListener("touchstart", e => {
+    g = null;
+    if (ptrBusy || !e.touches || e.touches.length !== 1) return;
+    const p = pick(e.target);
+    if (!p || p.sc.scrollTop > 0) return;
+    g = { sc: p.sc, run: p.run, top: p.sc.getBoundingClientRect().top, y0: e.touches[0].clientY, x0: e.touches[0].clientX, pull: 0, on: false };
+  }, { passive: true });
+  root.addEventListener("touchmove", e => {
+    if (!g || ptrBusy || !e.touches || !e.touches.length) return;
+    const t = e.touches[0], dy = t.clientY - g.y0, dx = t.clientX - g.x0;
+    if (!g.on) {
+      if (g.sc.scrollTop > 0 || dy < -6 || (Math.abs(dx) > 14 && Math.abs(dx) > dy)) { g = null; return; }
+      if (dy < 10) return;
+      g.on = true; g.y0 = t.clientY; g.sc.style.transition = "none";
+    }
+    g.pull = Math.min(PTR_MAX, Math.max(0, t.clientY - g.y0) * 0.55);
+    ptr.classList.toggle("go", g.pull >= PTR_GO);
+    ptrPaint(g, g.pull);
+  }, { passive: true });
+  root.addEventListener("touchend", end);
+  root.addEventListener("touchcancel", () => { if (g) g.pull = 0; end(); });
+}
+async function refreshCatalogue() {
+  await loadRepoIndex();
+  if (libTab === "repo" && repoView === "catalogue" && !$("#lib").hidden) await renderRepo();
+}
+async function refreshOnline() {
+  await olConnect();
+  if (!ol.err) { olReset(false); await olLoad(false); }
+  if (libTab === "repo" && repoView === "online" && !$("#lib").hidden) await renderOnline();
+}
+async function refreshManga() {
+  const id = ol.manga && ol.manga.id; if (id == null) return;
+  try {
+    const r = await olApi(`api/manga/${id}?refresh=1`, { timeout: 190000 });
+    if (ol.manga && ol.manga.id === id) { ol.manga = { id, data: r }; ol.mangaErr = ""; }
+  } catch (e) { if (ol.manga && ol.manga.id === id) toast(olMsg(e)); }
+  try { ol.jobs = (await olApi("api/jobs", { timeout: 10000 })).jobs; } catch {}
+  paintManga(); olPoll();
+}
+pullToRefresh($("#libBody"), t => {
+  if (libTab !== "repo" || !repo || (t.closest && t.closest("select, input, textarea"))) return null;
+  if (repoView === "catalogue") return repoIndex || repoErr ? { sc: $("#libBody"), run: refreshCatalogue } : null;
+  return navigator.onLine && (ol.status || ol.err) ? { sc: $("#libBody"), run: refreshOnline } : null;
+});
+pullToRefresh(panel, t => {
+  const sc = t.closest && t.closest(".p-body.pull");
+  return sc && ol.manga && ol.manga.data ? { sc, run: refreshManga } : null;
 });
 
 /* ================= vocab ================= */
@@ -2920,7 +3082,7 @@ document.addEventListener("click", e => {
 
 /* ================= boot ================= */
 const applyGlass = () => document.documentElement.classList.toggle("glass", settings.glass !== "off");
-const APP_VERSION = "1.2.29";
+const APP_VERSION = "1.2.30";
 (async () => {
   settings = { ...DEF, ...(await kvGet("settings", {})) };
   applyGlass();
