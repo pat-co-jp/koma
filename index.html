@@ -169,7 +169,14 @@ select.field option{color:#111;background:#fff}
 /* 1.2.33 (Patrick): the Catalogue and the Online Library lay out the same way: where the shelves are narrower than
    both capsules need on one line (the outer screen), the switch sits above the bar, left-aligned, in both views */
 #libBody{container-type:inline-size}
-@container (max-width:760px){.stick{flex-direction:column;align-items:flex-start}}
+.rselcap{display:none}
+.rselcap select.field{margin:0;min-height:44px;padding-top:0;padding-bottom:0}
+/* 1.2.35 (Patrick): narrow shelves: the switch becomes a dropdown so it and the bar share one line (they still wrap on
+   a phone-sized screen); the bar's Sort / Show labels make way */
+@container (max-width:760px){
+  .stick > .rseg{display:none}
+  .stick > .rselcap{display:flex;align-items:center;flex:none;padding:6px 8px;background:var(--ink);border-radius:16px}
+  .stick .libbar .sortsel > span{display:none}}
 /* 1.2.32 (Patrick): on a wide screen (inner screen in landscape) the controls sit in the header row between the title
    and the buttons (placeBar), all at one height, instead of floating over the top of the shelves */
 .lib-head .hmid{display:none}
@@ -380,7 +387,13 @@ textarea.copybox{width:100%;height:160px;background:var(--panel);color:var(--tex
 /* 1.2.24: the sticky sort/filter bar is glass over the shelves scrolling under it */
 .glass .libbar{background:var(--g-light),rgba(30,30,35,.62);-webkit-backdrop-filter:var(--g-fx);backdrop-filter:var(--g-fx);
   box-shadow:var(--g-ring),var(--g-drop);border-radius:24px}
-.glass .libbar .sortsel select{background-color:rgba(255,255,255,.07)}
+.glass .libbar .sortsel select{background-color:rgba(255,255,255,.07);border-radius:999px;padding-left:16px}   /* 1.2.35: pills, like the switch */
+.glass .libbar{border-radius:999px}
+.glass .libbar.selbar{border-radius:27px}
+.hmid .selbar{border-radius:999px}
+.glass .stick > .rselcap{background:var(--g-light),rgba(30,30,35,.74);-webkit-backdrop-filter:var(--g-fx);backdrop-filter:var(--g-fx);
+  box-shadow:var(--g-ring),var(--g-drop);border-radius:999px;padding:5px}
+.glass .rselcap select.field{border-radius:999px;background-color:rgba(255,255,255,.07);border-color:transparent}
 .glass .libbar{padding-top:5px;padding-bottom:5px}
 
 /* controls on the dark background: lit glass edge, no live blur */
@@ -693,7 +706,7 @@ function fitSel(sel) {
   selRuler.remove();
   if (w > 20) sel.style.width = Math.ceil(w + 2) + "px";
 }
-const fitSels = () => document.querySelectorAll(".libbar select, .stick .olbar select").forEach(fitSel);
+const fitSels = () => document.querySelectorAll(".libbar select, .stick .olbar select, .rselcap select").forEach(fitSel);
 function sortBar(kind, sorts, sort, filters, filt, count, extra = "") {
   return `<div class="libbar">
     <label class="sortsel"><span>Sort</span><select data-${kind}sort aria-label="Sort volumes">${sorts.map(([k, l]) =>
@@ -1518,7 +1531,7 @@ new MutationObserver(recs => {
 }).observe(libBodyEl, { childList: true });
 const relayoutLib = () => { if (headWide() !== $("#lib").classList.contains("headbar") && settingsReady) renderLibrary(); };
 addEventListener("resize", relayoutLib); addEventListener("orientationchange", relayoutLib);
-document.addEventListener("change", e => { if (e.target.matches && e.target.matches(".libbar select, .olbar select")) fitSel(e.target); });
+document.addEventListener("change", e => { if (e.target.matches && e.target.matches(".libbar select, .olbar select, .rselcap select")) fitSel(e.target); });
 setInterval(() => { if (document.hidden) return; fitApp(); const g = geo(); if (g !== lastGeo) { lastGeo = g; applyScreen(); } else coverResync(); }, 400);
 fitApp();
 
@@ -2710,8 +2723,12 @@ const MSTATUS = { ONGOING: "Ongoing", COMPLETED: "Completed", LICENSED: "License
 const olUrl = p => new URL(p, repo.url).href;
 const apiImg = p => typeof p === "string" && /^api\/[\w\/.\-%]+$/.test(p) ? olUrl(p) : "";
 function repoSeg() {
+  // 1.2.35 (Patrick): where the shelves are narrow (the outer screen) the switch is a dropdown in its own capsule, so it
+  // shares a line with the bar; CSS shows one or the other (container query on #libBody)
   return `<div class="seg rseg"><button data-rv="catalogue" class="${repoView === "catalogue" ? "on" : ""}">Catalogue</button>` +
-    `<button data-rv="online" class="${repoView === "online" ? "on" : ""}">Online library</button></div>`;
+    `<button data-rv="online" class="${repoView === "online" ? "on" : ""}">Online library</button></div>` +
+    `<div class="rselcap"><select class="field" data-rvsel aria-label="View"><option value="catalogue"${repoView === "catalogue" ? " selected" : ""}>Catalogue</option>` +
+    `<option value="online"${repoView === "online" ? " selected" : ""}>Online library</option></select></div>`;
 }
 function olReset(full) {
   if (full) { ol.status = null; ol.err = ""; ol.sources = null; }
@@ -2837,6 +2854,9 @@ $("#lib").addEventListener("click", e => {
   if (mg) openManga(+mg.dataset.olmanga);
 });
 $("#lib").addEventListener("change", e => {
+  if (e.target.matches && e.target.matches("select[data-rvsel]")) {   // 1.2.35: the switch as a dropdown
+    repoView = e.target.value; kvSet("repoView", repoView); renderRepo(); return;
+  }
   if (e.target.id === "olMode") {                      // 1.2.34: the list dropdown
     ol.mode = e.target.value; ol.q = ""; olReset(false); renderOnline();
     if (ol.mode === "SEARCH") setTimeout(() => $("#olQ") && $("#olQ").focus(), 60);
@@ -3154,7 +3174,7 @@ document.addEventListener("click", e => {
 
 /* ================= boot ================= */
 const applyGlass = () => document.documentElement.classList.toggle("glass", settings.glass !== "off");
-const APP_VERSION = "1.2.34";
+const APP_VERSION = "1.2.35";
 (async () => {
   settings = { ...DEF, ...(await kvGet("settings", {})) };
   applyGlass();
