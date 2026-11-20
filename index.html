@@ -51,7 +51,6 @@ button:disabled{opacity:.35;cursor:default}
 .libbar .sortsel{flex:0 1 auto;min-width:0}
 .libbar .sortsel select{flex:0 1 auto;min-width:0;width:auto;max-width:240px;text-overflow:ellipsis;white-space:nowrap;overflow:hidden}
 .libbar > .lchip{flex:none}
-.libbar.selbar{flex-wrap:wrap}
 @media (max-width:520px){.libbar .sortsel > span{display:none}}
 /* 1.2.29 (Patrick, outer screen): a select is as wide as its longest option, so each dropdown carried slack and the bar
    ran into the screen's right corner. fitSel() sizes each one to the option showing; the bar keeps 16 pt from the edge. */
@@ -67,7 +66,10 @@ button:disabled{opacity:.35;cursor:default}
 .nomatch{color:var(--mute);display:flex;align-items:center;gap:12px;flex-wrap:wrap}
 .lchip.danger{color:#ff8a7a;border-color:#5a2323;background:#2a1616}
 .lchip.danger:disabled{opacity:.4}
-.selbar .selcount{flex:1 1 100%;font-size:13.5px;color:var(--text);font-weight:600}
+.selbar .selcount{flex:none;padding:6px 10px 0;font-size:13.5px;color:var(--text);font-weight:600}
+/* 1.2.32 (Patrick): the select-mode capsule is only as wide as its text or its buttons, whichever is wider */
+.libbar.selbar{flex-direction:column;align-items:flex-start;flex-wrap:nowrap;gap:6px}
+.selbtns{display:flex;flex-wrap:wrap;gap:8px}
 .confirm{margin:-4px 0 16px;padding:12px 14px;border-radius:14px;background:#2a1616;border:1px solid #5a2323;display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 .confirm p{margin:0 0 4px;flex:1 1 100%;font-size:13.5px;line-height:1.4;color:var(--text)}
 .vol.selecting .cv img{transition:opacity .15s}
@@ -144,12 +146,27 @@ select.field option{color:#111;background:#fff}
 .stick > .rseg{flex:0 0 auto;margin:0}
 .stick > .rseg button{flex:none;padding:9px 16px}
 .stick > .olbar{flex:0 1 auto;max-width:100%;margin:0;flex-direction:row;flex-wrap:wrap;align-items:center;padding:6px 8px;background:var(--ink);border-radius:16px}
-.stick > .olbar select.field{flex:1 1 200px;width:auto;max-width:340px;min-height:44px;padding-top:0;padding-bottom:0}
+.stick > .olbar select.field{flex:none;max-width:340px;min-height:44px;padding-top:0;padding-bottom:0}   /* width: fitSel (1.2.32) */
 .stick > .olbar .seg{flex:0 0 auto}
 .stick > .olbar .seg button{flex:none;padding:9px 14px}
 .stick > .olbar .olsearch{flex:1 1 100%}
 #lib.repo #libBody,.p-body.pull{overscroll-behavior-y:none}   /* the pull replaces the rubber band (swipe down to refresh) */
 .hgrp{display:contents}
+/* 1.2.32 (Patrick): narrow screens stack the source picker over Popular / Latest / Search, and the capsule is as wide
+   as the wider of the two (the picker sized to the source showing) */
+@media (max-width:700px){
+  .stick > .olbar{flex-direction:column;align-items:flex-start;flex-wrap:nowrap}
+  .stick > .olbar > *{flex:none}
+  .stick > .olbar select.field{min-width:100%}}
+/* 1.2.32 (Patrick): on a wide screen (inner screen in landscape) the controls sit in the header row between the title
+   and the buttons (placeBar), all at one height, instead of floating over the top of the shelves */
+.lib-head .hmid{display:none}
+#lib.headbar .lib-head h1{flex:none}
+#lib.headbar .lib-head .hmid{display:flex;flex:1 1 auto;min-width:0;align-items:center;margin:0 14px 0 22px}
+.hmid .stick{position:static;margin:0;max-width:100%;flex-wrap:wrap}
+.hmid > .libbar{position:static;margin:0;max-width:100%}
+.hmid .selbar{flex-direction:row;align-items:center}
+.hmid .selbar .selcount{padding:0 6px 0 10px}
 /* swipe down to refresh (1.2.30) */
 #ptr{position:fixed;z-index:50;left:0;top:0;width:40px;height:40px;margin-left:-20px;border-radius:50%;display:grid;place-items:center;
   opacity:0;pointer-events:none;background:#232328;color:var(--text);box-shadow:0 4px 14px rgba(0,0,0,.4)}
@@ -349,6 +366,7 @@ textarea.copybox{width:100%;height:160px;background:var(--panel);color:var(--tex
 .glass .libbar{background:var(--g-light),rgba(30,30,35,.62);-webkit-backdrop-filter:var(--g-fx);backdrop-filter:var(--g-fx);
   box-shadow:var(--g-ring),var(--g-drop);border-radius:24px}
 .glass .libbar .sortsel select{background-color:rgba(255,255,255,.07)}
+.glass .libbar{padding-top:5px;padding-bottom:5px}
 
 /* controls on the dark background: lit glass edge, no live blur */
 .glass .lchip,.glass .sortsel select,.glass .dk,.glass .seg,.glass .field,.glass select.field{border-color:transparent;
@@ -371,11 +389,11 @@ textarea.copybox{width:100%;height:160px;background:var(--panel);color:var(--tex
    Cards' badges and buttons get the lit edge without a blur (dozens of blurs in a scrolling grid cost frames on a phone). */
 .glass .stick > .rseg,.glass .stick > .olbar,.glass #ptr,html.glass .p-head > .ib,html.glass .p-head > h2{
   background:var(--g-light),rgba(30,30,35,.74);-webkit-backdrop-filter:var(--g-fx);backdrop-filter:var(--g-fx);box-shadow:var(--g-ring),var(--g-drop);border:0}
-.glass .stick > .rseg{border-radius:999px;padding:4px;gap:4px}
+.glass .stick > .rseg{border-radius:999px;padding:5px;gap:4px}
 .glass .stick > .rseg button{border-radius:999px}
 .glass .stick > .rseg button.on,.glass .olbar .seg button.on{background:rgba(255,255,255,.16);box-shadow:inset 0 1px 0 rgba(255,255,255,.22)}
-.glass .stick > .olbar{border-radius:26px}
-.glass .olbar .seg{border-radius:999px;padding:3px;background-color:rgba(255,255,255,.07)}
+.glass .stick > .olbar{border-radius:27px;padding:5px 8px}
+.glass .olbar .seg{border-radius:999px;padding:0;border:0;background-color:rgba(255,255,255,.07)}
 .glass .olbar .seg button{border-radius:999px}
 .glass .olbar select.field{border-radius:999px;background-color:rgba(255,255,255,.07)}
 .glass .olsearch .field{border-radius:999px}
@@ -395,7 +413,7 @@ html.glass .p-body{padding-top:calc(var(--st) + var(--ct,0px) + 74px)}
 html.glass #panel::before{content:"";position:absolute;z-index:2;left:0;right:0;top:0;height:calc(var(--st) + var(--ct,0px) + 16px);
   background:linear-gradient(var(--ink),rgba(14,14,16,0));pointer-events:none}
 /* library header: the three buttons share one glass capsule */
-.glass .lib-head .hgrp{display:flex;align-items:center;gap:2px;padding:3px 5px;border-radius:999px;
+.glass .lib-head .hgrp{display:flex;align-items:center;gap:2px;padding:5px 6px;border-radius:999px;
   background:var(--g-light),rgba(255,255,255,.04);box-shadow:inset 0 1px 0 rgba(255,255,255,.14),inset 0 0 0 1px rgba(255,255,255,.07)}
 .glass .lib-head .hgrp .ib{border-radius:50%}
 /* cards: lit edges, no blur */
@@ -468,6 +486,7 @@ button,select,input,[data-vol],[data-olmanga]{touch-action:manipulation}
 <section id="lib">
   <div class="lib-head">
     <h1><b>読</b>Koma</h1>
+    <div class="hmid"></div>
     <div class="hgrp">
     <button class="ib" data-act="import" aria-label="Import"><svg viewBox="0 0 24 24"><path d="M12 4v11M7 10l5 5 5-5M5 19h14"/></svg></button>
     <button class="ib" data-act="vocab" aria-label="Saved words"><svg viewBox="0 0 24 24"><path d="M6 3h12v18l-6-4-6 4z"/></svg></button>
@@ -658,7 +677,7 @@ function fitSel(sel) {
   selRuler.remove();
   if (w > 20) sel.style.width = Math.ceil(w + 2) + "px";
 }
-const fitSels = () => document.querySelectorAll(".libbar select").forEach(fitSel);
+const fitSels = () => document.querySelectorAll(".libbar select, .stick .olbar select").forEach(fitSel);
 function sortBar(kind, sorts, sort, filters, filt, count, extra = "") {
   return `<div class="libbar">
     <label class="sortsel"><span>Sort</span><select data-${kind}sort aria-label="Sort volumes">${sorts.map(([k, l]) =>
@@ -727,10 +746,10 @@ async function renderLibrary() {
   if (libSel) {
     for (const id of [...libSel]) if (!allVols.some(v => v.id === id)) libSel.delete(id);
     const n = libSel.size, allOn = vols.length && vols.every(v => libSel.has(v.id));
-    bar = `<div class="libbar selbar"><span class="selcount">${n ? `${n} selected` : "Tap volumes to select them"}</span>
+    bar = `<div class="libbar selbar"><span class="selcount">${n ? `${n} selected` : "Tap volumes to select them"}</span><div class="selbtns">
       <button class="lchip" data-libsel="all">${allOn ? "Select none" : "Select all"}</button>
       <button class="lchip danger" data-libsel="remove"${n ? "" : " disabled"}>Remove${n ? " " + n : ""}</button>
-      <button class="lchip" data-libsel="done">Done</button></div>` +
+      <button class="lchip" data-libsel="done">Done</button></div></div>` +
       (libConfirm && n ? `<div class="confirm" role="alertdialog" aria-label="Confirm removal"><p>Remove ${n === 1 ? "this volume" : `these ${n} volumes`} from this phone?
         The pages, readings and reading position on this phone are deleted. Your laptop's Repository keeps its copy, so you can download ${n === 1 ? "it" : "them"} again.</p>
         <button class="lchip danger" data-libsel="confirm">Remove</button><button class="lchip" data-libsel="cancel">Cancel</button></div>` : "");
@@ -781,7 +800,7 @@ async function libSelAction(a) {
   }
   renderLibrary();
 }
-$("#libBody").addEventListener("change", e => {
+$("#lib").addEventListener("change", e => {
   const s = e.target.closest("select[data-libsort],select[data-catsort],select[data-libfilter],select[data-catfilter]"); if (!s) return;
   const key = s.hasAttribute("data-libsort") ? "libSort" : s.hasAttribute("data-catsort") ? "catSort" : s.hasAttribute("data-libfilter") ? "libFilter" : "catFilter";
   settings[key] = s.value; kvSet("settings", settings); renderLibrary();
@@ -791,7 +810,7 @@ async function footer() {
   try { const e = await navigator.storage.estimate(); s = `Using ${fmtBytes(e.usage || 0)} on this device`; } catch {}
   return `<div class="foot">${s}${s ? " · " : ""}Koma ${APP_VERSION}</div>`;
 }
-$("#libBody").addEventListener("click", e => {
+$("#lib").addEventListener("click", e => {
   const f = e.target.closest("button[data-libfilter],button[data-catfilter]");   // "Show all" (the bar's filter is a select)
   if (f) { if (f.dataset.libfilter) settings.libFilter = f.dataset.libfilter; else settings.catFilter = f.dataset.catfilter;
            kvSet("settings", settings); renderLibrary(); return; }
@@ -1456,8 +1475,23 @@ addEventListener("orientationchange", rescreen);
 addEventListener("pageshow", rescreen);
 document.addEventListener("visibilitychange", () => { if (!document.hidden) { lastGeo = geo(); fitApp(); applyScreen(); } });
 if (window.visualViewport) visualViewport.addEventListener("resize", rescreen);
-new MutationObserver(fitSels).observe(document.getElementById("libBody"), { childList: true });
-document.addEventListener("change", e => { if (e.target.matches && e.target.matches(".libbar select")) fitSel(e.target); });
+// 1.2.32: on a wide screen the bar of a freshly drawn list moves into the header row (placeBar); events are handled on
+// #lib, so it works in either place. Only a full redraw counts (moving the bar out is itself a change of #libBody).
+const libBodyEl = document.getElementById("libBody"), hmid = document.querySelector(".lib-head .hmid");
+const headWide = () => innerWidth >= 1000 && innerWidth > innerHeight;
+function placeBar() {
+  const wide = headWide();
+  $("#lib").classList.toggle("headbar", wide);
+  const b = wide ? libBodyEl.querySelector(":scope > .stick, :scope > .libbar") : null;
+  hmid.replaceChildren(...(b ? [b] : []));
+  fitSels();
+}
+new MutationObserver(recs => {
+  if (recs.some(r => [...r.addedNodes].includes(libBodyEl.firstChild))) placeBar(); else fitSels();
+}).observe(libBodyEl, { childList: true });
+const relayoutLib = () => { if (headWide() !== $("#lib").classList.contains("headbar") && settingsReady) renderLibrary(); };
+addEventListener("resize", relayoutLib); addEventListener("orientationchange", relayoutLib);
+document.addEventListener("change", e => { if (e.target.matches && e.target.matches(".libbar select, .olbar select")) fitSel(e.target); });
 setInterval(() => { if (document.hidden) return; fitApp(); const g = geo(); if (g !== lastGeo) { lastGeo = g; applyScreen(); } else coverResync(); }, 400);
 fitApp();
 
@@ -2751,7 +2785,7 @@ async function renderOnline() {
     <p class="olnote">Tap a series for its chapters. Download sends a chapter to your laptop: it appears under Catalogue as Processing on PC, and readings attach when the PC finishes.</p>`;
 }
 document.addEventListener("error", e => { if (e.target && e.target.classList && e.target.classList.contains("olimg")) e.target.remove(); }, true);
-$("#libBody").addEventListener("click", e => {
+$("#lib").addEventListener("click", e => {
   const rv = e.target.closest("[data-rv]");
   if (rv) { repoView = rv.dataset.rv; kvSet("repoView", repoView); renderRepo(); return; }
   const o = e.target.closest("[data-ol]");
@@ -2772,11 +2806,11 @@ $("#libBody").addEventListener("click", e => {
   const mg = e.target.closest("[data-olmanga]");
   if (mg) openManga(+mg.dataset.olmanga);
 });
-$("#libBody").addEventListener("change", e => {
+$("#lib").addEventListener("change", e => {
   if (e.target.id !== "olSrc") return;
   ol.src = e.target.value; ol.mode = "POPULAR"; ol.q = ""; kvSet("olSrc", ol.src); olReset(false); renderOnline();
 });
-$("#libBody").addEventListener("submit", e => {
+$("#lib").addEventListener("submit", e => {
   if (e.target.id !== "olForm") return;
   e.preventDefault();
   ol.q = $("#olQ").value.trim(); $("#olQ").blur(); olReset(false); renderOnline();
@@ -3085,7 +3119,7 @@ document.addEventListener("click", e => {
 
 /* ================= boot ================= */
 const applyGlass = () => document.documentElement.classList.toggle("glass", settings.glass !== "off");
-const APP_VERSION = "1.2.31";
+const APP_VERSION = "1.2.32";
 (async () => {
   settings = { ...DEF, ...(await kvGet("settings", {})) };
   applyGlass();
