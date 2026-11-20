@@ -1441,9 +1441,12 @@ function fitApp() {
 function chromeInsets() {
   const de = document.documentElement;
   const duo = foldable() || Math.max(innerWidth, innerHeight) > Math.max(screen.width, screen.height) * 1.2;
-  const inner = duo && screenMode !== "cover";
+  const inner = duo && screenMode !== "cover", outer = duo && screenMode === "cover";
   const land = innerWidth > innerHeight;
-  const v = { "--cl": inner ? "14px" : "", "--cr": inner ? (land ? "102px" : "174px") : "", "--ct": inner ? "6px" : "" };
+  // 1.2.31 (Patrick's outer-screen screenshot 12:20): iOS keeps the status column out of the page there (a right safe
+  // area of about 85 pt), but the camera's pixels sit just inside it at the top and touched the library's button capsule.
+  // On the outer screen the floating controls keep another 20 pt from the right.
+  const v = { "--cl": inner ? "14px" : "", "--cr": inner ? (land ? "102px" : "174px") : outer ? "20px" : "", "--ct": inner ? "6px" : "" };
   for (const k in v) if (de.style.getPropertyValue(k) !== v[k]) { if (v[k]) de.style.setProperty(k, v[k]); else de.style.removeProperty(k); }
   de.classList.toggle("duo-inner", inner);
 }
@@ -3082,7 +3085,7 @@ document.addEventListener("click", e => {
 
 /* ================= boot ================= */
 const applyGlass = () => document.documentElement.classList.toggle("glass", settings.glass !== "off");
-const APP_VERSION = "1.2.30";
+const APP_VERSION = "1.2.31";
 (async () => {
   settings = { ...DEF, ...(await kvGet("settings", {})) };
   applyGlass();
