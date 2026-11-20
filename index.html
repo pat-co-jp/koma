@@ -40,8 +40,8 @@ button:disabled{opacity:.35;cursor:default}
 .lib-body{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:0 calc(var(--sr) + 16px) calc(var(--sb) + 30px) calc(var(--sl) + 16px)}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(132px,1fr));gap:16px}
 /* library sort and filter (1.2.15) */
-.libbar{display:flex;flex-wrap:nowrap;align-items:center;gap:8px 10px;margin:0 -8px 14px;padding:6px 8px;
-  width:fit-content;max-width:calc(100% + 16px);
+.libbar{display:flex;flex-wrap:nowrap;align-items:center;gap:8px 10px;margin:0 0 14px -8px;padding:6px 8px;
+  width:fit-content;max-width:calc(100% + 8px);
   position:sticky;top:10px;z-index:20;background:var(--ink)}   /* 1.2.24: stays at the top while the shelves scroll */
 /* 1.2.28: a fade at the top of the shelves (the bar floats 10 pt below it), so nothing scrolls up sharp against the header */
 .libfade{position:sticky;top:0;z-index:21;height:10px;margin:0 calc(-1 * (var(--sr) + 16px)) 0 calc(-1 * (var(--sl) + 16px));
@@ -53,6 +53,9 @@ button:disabled{opacity:.35;cursor:default}
 .libbar > .lchip{flex:none}
 .libbar.selbar{flex-wrap:wrap}
 @media (max-width:520px){.libbar .sortsel > span{display:none}}
+/* 1.2.29 (Patrick, outer screen): a select is as wide as its longest option, so each dropdown carried slack and the bar
+   ran into the screen's right corner. fitSel() sizes each one to the option showing; the bar keeps 16 pt from the edge. */
+@media (max-width:700px){.libbar .sortsel select{max-width:200px}}
 .sortsel{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--mute)}
 .sortsel select{min-height:44px;padding:0 34px 0 14px;border-radius:12px;border:1px solid var(--line);color:var(--text);font:600 14px system-ui,-apple-system,sans-serif;
   -webkit-appearance:none;appearance:none;background:#1c1c21 url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' fill='none' stroke='%23999' stroke-width='1.6'/%3E%3C/svg%3E") no-repeat right 12px center/11px 8px}
@@ -299,7 +302,7 @@ textarea.copybox{width:100%;height:160px;background:var(--panel);color:var(--tex
   background:var(--g-light),var(--g-tint);-webkit-backdrop-filter:var(--g-fx);backdrop-filter:var(--g-fx);box-shadow:var(--g-ring),var(--g-drop);border:0}
 /* reader: the top bar floats as a capsule; the page number is a pill; the 読 button a glass disc */
 .glass #top{left:calc(var(--sl) + 10px);right:calc(var(--sr) + 10px);top:calc(var(--st) + 8px);padding:3px 4px;border-radius:26px;background:var(--g-light),var(--g-tint-hi)}
-.glass #reader.hide-chrome #top{transform:translateY(calc(-100% - var(--st) - 24px))}
+.glass #reader.hide-chrome #top{transform:translateY(calc(-100% - var(--st) - var(--ct,0px) - 24px))}
 .glass #bottom{background:none;padding:0 calc(var(--sr) + 86px) calc(var(--sb) + 22px) calc(var(--sl) + 16px)}
 .glass #pnum{margin-left:auto;min-width:0;padding:7px 13px;border-radius:999px;color:var(--text);font-size:12.5px}
 .glass #pnum:empty{display:none}
@@ -342,6 +345,26 @@ textarea.copybox{width:100%;height:160px;background:var(--panel);color:var(--tex
   .glass .libbar{background:#232328;-webkit-backdrop-filter:none;backdrop-filter:none}
   .glass #top,.glass #pnum,.glass #boxBtn,.glass .tabs,.glass #toast,.glass #closed .tip,.glass #busy div{background:#232328;-webkit-backdrop-filter:none;backdrop-filter:none}
   .glass #sheet{background:var(--paper);-webkit-backdrop-filter:none;backdrop-filter:none}}
+/* 1.2.29 (Patrick): the reader's top bar is three pieces of glass: the back button alone in a disc on the left, the title
+   in a capsule only as wide as its text (centred), and the page controls in their own capsule on the right. The space
+   between them is open, so a tap there reaches the page. --cl / --cr / --ct keep them clear of the Duo inner screen's
+   rounded corners and of iOS's status overlay, which is drawn inside the page with no safe-area inset (chromeInsets). */
+.tgrp{display:contents}
+html.glass #top{left:calc(var(--sl) + 10px + var(--cl,0px));right:calc(var(--sr) + 10px + var(--cr,0px));top:calc(var(--st) + 8px + var(--ct,0px));
+  padding:0;border-radius:0;background:none;-webkit-backdrop-filter:none;backdrop-filter:none;box-shadow:none;
+  display:grid;grid-template-columns:1fr minmax(0,max-content) 1fr;align-items:center;gap:10px;pointer-events:none}
+html.glass #top > *{pointer-events:auto}
+html.glass #top > .ib,html.glass #top > .ttl,html.glass #top > .tgrp{background:var(--g-light),var(--g-tint-hi);
+  -webkit-backdrop-filter:var(--g-fx);backdrop-filter:var(--g-fx);box-shadow:var(--g-ring),var(--g-drop)}
+html.glass #top > .ib{justify-self:start;width:50px;height:50px;border-radius:50%}
+html.glass #top > .ttl{justify-self:center;max-width:100%;min-height:50px;box-sizing:border-box;padding:5px 20px;border-radius:999px;
+  display:flex;flex-direction:column;justify-content:center}
+html.glass #top > .tgrp{justify-self:end;display:flex;align-items:center;gap:2px;padding:3px 5px;border-radius:999px}
+html.glass #top .tgrp .ib{border-radius:50%}
+@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
+  html.glass #top > .ib,html.glass #top > .ttl,html.glass #top > .tgrp{background:var(--g-light),rgba(28,28,32,.94)}}
+@media (prefers-reduced-transparency: reduce){
+  html.glass #top > .ib,html.glass #top > .ttl,html.glass #top > .tgrp{background:#232328;-webkit-backdrop-filter:none;backdrop-filter:none}}
 
 /* ---------- touch targets (1.2.4): every control owns at least 44 x 44 pt (Apple HIG) ---------- */
 /* Small pills keep their look and get an invisible hit area around them instead of growing. */
@@ -390,9 +413,11 @@ button,select,input,[data-vol],[data-olmanga]{touch-action:manipulation}
   <header id="top" class="bar">
     <button class="ib" data-act="close-reader" aria-label="Library"><svg viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg></button>
     <div class="ttl"><b id="volName"></b><span id="volSub"></span></div>
+    <div class="tgrp">
     <button class="ib" data-act="shift" aria-label="Shift page pairs" hidden><svg viewBox="0 0 24 24"><path d="M4 8h15l-4-4M20 16H5l4 4"/></svg></button>
     <button class="ib" data-act="vocab" aria-label="Saved words"><svg viewBox="0 0 24 24"><path d="M6 3h12v18l-6-4-6 4z"/></svg></button>
     <button class="ib" data-act="settings" aria-label="Settings"><svg viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg></button>
+    </div>
   </header>
   <footer id="bottom" class="bar">
     <div id="pnum"></div>
@@ -550,6 +575,19 @@ const LIB_FILTERS = [["all", "All"], ["unread", "Unread"], ["reading", "Reading"
 const CAT_SORTS = [["added", "Newest added"], ["added-old", "Oldest added"], ["name", "Name (A–Z)"], ["name-desc", "Name (Z–A)"], ["series", "Series"]];
 const CAT_FILTERS = [["all", "All"], ["missing", "Not on phone"], ["phone", "On phone"], ["processing", "Processing"], ["ready", "Readings ready"]];
 let libSel = null, libConfirm = false;          // 1.2.16: select mode on "On this phone" (a Set of volume ids)
+const selRuler = document.createElement("span");
+function fitSel(sel) {
+  const o = sel.options[sel.selectedIndex]; if (!o) return;
+  const cs = getComputedStyle(sel);
+  selRuler.style.cssText = `position:absolute;left:-9999px;top:0;visibility:hidden;white-space:pre;font-weight:${cs.fontWeight};font-size:${cs.fontSize};font-family:${cs.fontFamily};letter-spacing:${cs.letterSpacing}`;
+  selRuler.textContent = o.textContent;
+  document.body.appendChild(selRuler);
+  const w = selRuler.getBoundingClientRect().width + parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight)
+          + parseFloat(cs.borderLeftWidth) + parseFloat(cs.borderRightWidth);
+  selRuler.remove();
+  if (w > 20) sel.style.width = Math.ceil(w + 2) + "px";
+}
+const fitSels = () => document.querySelectorAll(".libbar select").forEach(fitSel);
 function sortBar(kind, sorts, sort, filters, filt, count, extra = "") {
   return `<div class="libbar">
     <label class="sortsel"><span>Sort</span><select data-${kind}sort aria-label="Sort volumes">${sorts.map(([k, l]) =>
@@ -1243,6 +1281,7 @@ function applyScreen(force) {
   else if (!closedEl.hidden) coverHide();                           // opened: the inside, at once
   else coverUp = false;
   refreshSpread();
+  chromeInsets();
   scrInfoPaint();
 }
 // 1.2.8: folding doesn't always arrive as a resize event in a Home Screen app, so several signals trigger a check,
@@ -1320,6 +1359,21 @@ function fitApp() {
     scrollTo(0, 0); if (document.scrollingElement) document.scrollingElement.scrollTop = 0;
   }
   if (de.style.getPropertyValue("--app-h") !== h + "px") de.style.setProperty("--app-h", h + "px");
+  chromeInsets();
+}
+// 1.2.29 (Patrick): on the Duo's inner screen the floating reader controls sat under the rounded top-left corner and
+// under iOS's status overlay at the top right (drawn inside the page; env(safe-area-inset-*) reports 0 there). Measured
+// on his screenshots: the overlay spans about x 1170-1237, y 22-77 pt in landscape (1267 wide) and a pill at about
+// x 718-862, y 33-100 in portrait (892 wide). The controls keep 24 pt from the left corner and clear the overlay.
+// The inner screen: a taught outer screen, or (untaught) the Duo's tell, a window much larger than what `screen` reports.
+function chromeInsets() {
+  const de = document.documentElement;
+  const duo = foldable() || Math.max(innerWidth, innerHeight) > Math.max(screen.width, screen.height) * 1.2;
+  const inner = duo && screenMode !== "cover";
+  const land = innerWidth > innerHeight;
+  const v = { "--cl": inner ? "14px" : "", "--cr": inner ? (land ? "102px" : "174px") : "", "--ct": inner ? "6px" : "" };
+  for (const k in v) if (de.style.getPropertyValue(k) !== v[k]) { if (v[k]) de.style.setProperty(k, v[k]); else de.style.removeProperty(k); }
+  de.classList.toggle("duo-inner", inner);
 }
 const rescreen = () => { cancelAnimationFrame(rzq); rzq = requestAnimationFrame(() => { lastGeo = geo(); fitApp(); applyScreen(); }); };
 addEventListener("resize", rescreen);
@@ -1327,6 +1381,8 @@ addEventListener("orientationchange", rescreen);
 addEventListener("pageshow", rescreen);
 document.addEventListener("visibilitychange", () => { if (!document.hidden) { lastGeo = geo(); fitApp(); applyScreen(); } });
 if (window.visualViewport) visualViewport.addEventListener("resize", rescreen);
+new MutationObserver(fitSels).observe(document.getElementById("libBody"), { childList: true });
+document.addEventListener("change", e => { if (e.target.matches && e.target.matches(".libbar select")) fitSel(e.target); });
 setInterval(() => { if (document.hidden) return; fitApp(); const g = geo(); if (g !== lastGeo) { lastGeo = g; applyScreen(); } else coverResync(); }, 400);
 fitApp();
 
@@ -1669,7 +1725,7 @@ void main() {
   // Textures are cached by image URL and uploaded ahead of time (warm), so a turn starts without a hitch.
   const texCache = new Map();
   function tex(im) {
-    const key = im && im.naturalWidth ? im.src : "blank";
+    const key = im && (im.komaKey || (im.naturalWidth ? im.src : "")) || "blank";   // 1.2.29: a canvas carries its own key
     let t = texCache.get(key);
     if (t) { texCache.delete(key); texCache.set(key, t); return t; }      // refresh LRU position
     t = makeTex(im); texCache.set(key, t);
@@ -1688,7 +1744,9 @@ void main() {
   function makeTex(im) {
     const t = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, t);
-    if (im && im.naturalWidth) {
+    if (im && im.komaKey) {                              // a composed sheet (canvas), already sized for the GPU
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, im);
+    } else if (im && im.naturalWidth) {
       const max = Math.min(gl.getParameter(gl.MAX_TEXTURE_SIZE), 4096);
       const s = Math.min(1, max / Math.max(im.naturalWidth, im.naturalHeight));
       let src = im;
@@ -1801,10 +1859,12 @@ function curlParams(t, m) {
   const w = m.w, h = m.h;
   // Spread: the leaf turns over the spine and lands on the far half, so the corner travels 2w, the roll
   // tightens to nothing as it lands, and the corner tracks the finger 1:1 (single page: half speed).
+  // 1.2.29: a poster turn (a whole spread as one sheet) moves like a single page
+  const leaf = t.spread && !t.poster;
   const sRaw = t.released ? t.p : t.k * t.p;
-  const s = Math.max(0, Math.min(1, t.forward || t.spread ? sRaw : 1 - sRaw));   // spreads curl the grabbed page both ways
+  const s = Math.max(0, Math.min(1, t.forward || leaf ? sRaw : 1 - sRaw));   // spreads curl the grabbed page both ways
   const R0 = Math.max(16, Math.min(60, w * 0.11));
-  const R = t.spread ? Math.max(0.5, R0 * (1 - s)) : R0 * (1 - 0.6 * s);
+  const R = leaf ? Math.max(0.5, R0 * (1 - s)) : R0 * (1 - 0.6 * s);
   const cy0 = Math.max(0, Math.min(h, t.fy0 - m.T));
   let tilt = 1;
   if (t.released && t.relP != null) {
@@ -1812,7 +1872,7 @@ function curlParams(t, m) {
     tilt = span > 1e-3 ? 1 - Math.min(1, Math.abs(t.p - t.relP) / span) : 0;
   }
   const fy = cy0 + ((t.fy ?? t.fy0) - t.fy0) * tilt;
-  const Fx = t.spread ? w - s * 2 * w : w - s * (2 * w + 2 * Math.PI * R0), Fy = Math.max(-h * 0.25, Math.min(h * 1.25, fy));
+  const Fx = leaf ? w - s * 2 * w : w - s * (2 * w + 2 * Math.PI * R0), Fy = Math.max(-h * 0.25, Math.min(h * 1.25, fy));
   let N = [1, 0], P = [w + 4 * R0, cy0];                        // s = 0: nothing curls
   const dx = w - Fx, dy = cy0 - Fy;
   if (dx > 0.5) {
@@ -1825,7 +1885,7 @@ function curlParams(t, m) {
   const shadow = Math.min(1, s / 0.04) * (1 - Math.max(0, (s - 0.9) / 0.1));
   // mirror = the leaf's spine is on its right. Single page and forward spread turns in RTL; a back turn in a spread
   // grabs the page on the other side of the spine.
-  const mirror = t.spread && !t.forward ? t.ltr : !t.ltr;
+  const mirror = leaf && !t.forward ? t.ltr : !t.ltr;
   return { mirror, P, N, R, dim: 0.22 * (1 - s), shadow };
 }
 function turnBegin(forward, fy) {
@@ -1847,7 +1907,26 @@ function turnBegin(forward, fy) {
 // Forward (RTL): the left page turns right; the later spread's right page is on its back.
 // Back (1.2.7): the right page turns left; the earlier spread's left page is on its back (until 1.2.6 a back turn
 // replayed the forward turn in reverse, so the right page never curled from its corner).
-// Wide pages and empty leaves slide instead.
+// 1.2.29 (Patrick): a wide page (a double-page spread printed as one image) or a spread with an empty half turns as one
+// sheet, like flipping a poster: both pages are composed onto one canvas and it curls like a single page, whole.
+// (Until 1.2.28 these slid.)
+function posterSheet(rs, pg) {
+  if (!rs.length) return null;
+  const L = Math.min(...rs.map(r => r.L)), T = Math.min(...rs.map(r => r.T));
+  const rect = { L, T, w: Math.max(...rs.map(r => r.L + r.w)) - L, h: Math.max(...rs.map(r => r.T + r.h)) - T };
+  const d = Math.min(2, window.devicePixelRatio || 1), sc = Math.min(d, 4096 / Math.max(rect.w, rect.h, 1));
+  const ims = rs.map(r => { const p = pg(r.i); return p && p.img && p.img.naturalWidth ? p.img : null; });
+  const c = document.createElement("canvas");
+  c.width = Math.max(1, Math.round(rect.w * sc)); c.height = Math.max(1, Math.round(rect.h * sc));
+  c.komaKey = "sheet:" + rs.map((r, j) => `${ims[j] ? ims[j].src : "-"}@${Math.round(r.L)},${Math.round(r.T)},${Math.round(r.w)}`).join("|") + `:${c.width}x${c.height}`;
+  const g = c.getContext("2d");
+  g.fillStyle = "#0e0e10"; g.fillRect(0, 0, c.width, c.height);
+  rs.forEach((r, j) => {
+    const x = (r.L - L) * sc, y = (r.T - T) * sc, w = r.w * sc, h = r.h * sc;
+    if (ims[j]) g.drawImage(ims[j], x, y, w, h); else { g.fillStyle = "#fff"; g.fillRect(x, y, w, h); }
+  });
+  return { c, r: rect };
+}
 function turnBuildSpread() {
   const cu = st.unitOf[st.idx];
   const pg = i => {
@@ -1874,7 +1953,18 @@ function turnBuildSpread() {
     turnEl.classList.add("ready"); viewer.classList.add("turning");
     return false;
   }
-  tn.gl = false;
+  if (tn.mode === "curl" && glCurl.init()) {             // 1.2.29: wide page or an empty half: the poster turn
+    const m = posterSheet(fw ? curRs : tgtRs, pg), u = posterSheet(fw ? tgtRs : curRs, pg);
+    if (m) {
+      tn.gl = true; tn.poster = true; tn.k = 0.5;
+      glCurl.scene(m.c, m.r, u ? u.c : null, u ? u.r : null);
+      turnEl.appendChild(glCurl.canvas());
+      glRender();
+      turnEl.classList.add("ready"); viewer.classList.add("turning");
+      return false;
+    }
+  }
+  tn.gl = false; tn.poster = false; tn.k = 1;
   tn.a = spreadPane(curRs, pg); tn.b = spreadPane(tgtRs, pg);
   turnEl.append(tn.b, tn.a);
   return true;
@@ -2830,7 +2920,7 @@ document.addEventListener("click", e => {
 
 /* ================= boot ================= */
 const applyGlass = () => document.documentElement.classList.toggle("glass", settings.glass !== "off");
-const APP_VERSION = "1.2.28";
+const APP_VERSION = "1.2.29";
 (async () => {
   settings = { ...DEF, ...(await kvGet("settings", {})) };
   applyGlass();
