@@ -184,6 +184,10 @@ select.field option{color:#111;background:#fff}
 #lib.headbar .lib-head .hmid{display:flex;flex:1 1 auto;min-width:0;align-items:center;margin:0 14px 0 22px}
 .hmid .stick{position:static;margin:0;max-width:100%;flex-wrap:nowrap}   /* 1.2.33: always one line in the header row */
 .hmid .stick > .olbar{flex-wrap:nowrap}
+/* 1.2.36 (Patrick): a long source name ("Pixivコミック (JA) · JA") ran the bar under the buttons: the menu and the bar may
+   shrink, so the picker shortens its text (ellipsis, down to 120 pt) and the bar stays 14 pt clear of the buttons */
+.hmid .stick{min-width:0}
+.hmid .stick > .olbar{min-width:0}
 
 .hmid .stick > .libbar{flex:0 1 auto;min-width:0}
 .hmid > .libbar{position:static;margin:0;max-width:100%}
@@ -3174,7 +3178,7 @@ document.addEventListener("click", e => {
 
 /* ================= boot ================= */
 const applyGlass = () => document.documentElement.classList.toggle("glass", settings.glass !== "off");
-const APP_VERSION = "1.2.35";
+const APP_VERSION = "1.2.36";
 (async () => {
   settings = { ...DEF, ...(await kvGet("settings", {})) };
   applyGlass();
