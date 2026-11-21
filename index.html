@@ -706,7 +706,7 @@ const LIB_FILTERS = [["all", "All"], ["unread", "Unread"], ["reading", "Reading"
 const CAT_SORTS = [["added", "Newest added"], ["added-old", "Oldest added"], ["name", "Name (A–Z)"], ["name-desc", "Name (Z–A)"], ["series", "Series"]];
 const CAT_FILTERS = [["all", "All"], ["missing", "Not on phone"], ["phone", "On phone"], ["processing", "Processing"], ["ready", "Readings ready"]];
 let libSel = null, libConfirm = false;
-let catSel = null, catConfirm = false, catShown = [];   // 1.2.37: select mode on the Catalogue (ids to remove from the laptop)          // 1.2.16: select mode on "On this phone" (a Set of volume ids)
+let catSel = null, catConfirm = false, catShown = [], catSharp = [];   // 1.2.37: select mode on the Catalogue (ids to remove from the laptop)          // 1.2.16: select mode on "On this phone" (a Set of volume ids)
 const selRuler = document.createElement("span");
 function fitSel(sel) {
   const o = sel.options[sel.selectedIndex]; if (!o) return;
@@ -869,6 +869,7 @@ $("#lib").addEventListener("click", e => {
     if (pv) { libSel.has(pv.dataset.vol) ? libSel.delete(pv.dataset.vol) : libSel.add(pv.dataset.vol); libConfirm = false; renderLibrary(); }
     return;
   }
+  const sp = e.target.closest("[data-sharp]"); if (sp) { sharpenOnPhone(sp.dataset.sharp === "all" ? [...catSharp] : [sp.dataset.sharp]); return; }
   const g = e.target.closest("[data-get]"); if (g) { downloadFromRepo(g.dataset.get); return; }
   const v = e.target.closest("[data-vol]"); if (v) openVolume(v.dataset.vol);
   const a = e.target.closest("[data-repo]"); if (a) repoAction(a.dataset.repo);
@@ -2697,13 +2698,18 @@ async function renderRepo() {
   if (!repoIndex && !repoErr) { body.innerHTML = repoSeg() + `<div class="empty"><p>Loading ${esc(repo.name)}…</p></div>`; await loadRepoIndex(); }
   if (!repo) return;                                    // removed (Settings) while the catalogue was loading
   if (libTab !== "repo" || repoView !== "catalogue") return;
-  const local = new Map();
-  for (const lv of await all("volumes")) { local.set(lv.id, lv.id); if (lv.repoId) local.set(lv.repoId, lv.id); }
+  const local = new Map(), localRec = new Map();
+  for (const lv of await all("volumes")) { local.set(lv.id, lv.id); localRec.set(lv.id, lv); if (lv.repoId) { local.set(lv.repoId, lv.id); localRec.set(lv.repoId, lv); } }
+  // 1.2.38: copies on this phone whose pages the laptop has since sharpened (upscaled)
+  const sharpable = v => { const lv = localRec.get(v.id); return !!(lv && v.upscaled && lv.upscaled !== v.upscaled); };
+  catSharp = [];
   // 1.2.30: the switch and the sort/filter bar float together (.stick); Refresh became swipe down to refresh
   const head = (bar = "") => `<div class="libfade" aria-hidden="true"></div><div class="stick">${repoSeg()}${bar}</div>` +
-    `<div class="rhead"><span><b>${esc(repo.name)}</b>${repoIndex ? ` · ${repoIndex.volumes.length} volume${repoIndex.volumes.length === 1 ? "" : "s"}` : ""}</span></div>`;
+    `<div class="rhead"><span><b>${esc(repo.name)}</b>${repoIndex ? ` · ${repoIndex.volumes.length} volume${repoIndex.volumes.length === 1 ? "" : "s"}` : ""}</span>` +
+    `${catSharp.length > 1 && !catSel ? `<button class="lchip" data-sharp="all">Sharper pages for ${catSharp.length} on this phone</button>` : ""}</div>`;
   if (repoErr) { body.innerHTML = head() + `<div class="err">${esc(repoErr)}</div>`; return; }
   const allRepo = repoIndex.volumes;
+  catSharp = allRepo.filter(sharpable).map(v => v.id);
   if (!allRepo.length) { body.innerHTML = head() + `<div class="empty"><p>The repository is empty. Volumes appear here once the laptop finishes processing them.</p></div>`; return; }
   const cs = CAT_SORTS.some(x => x[0] === settings.catSort) ? settings.catSort : "added";
   const cf = CAT_FILTERS.some(x => x[0] === settings.catFilter) ? settings.catFilter : "all";
@@ -2733,6 +2739,7 @@ async function renderRepo() {
     const picked = catSel && catSel.has(v.id);
     const btn = catSel ? `<span class="tick" aria-hidden="true"></span>`
       : busyPct != null ? `<span class="get busy">${busyPct}%</span>`
+      : have && sharpable(v) ? `<span class="get" data-sharp="${esc(v.id)}">Sharper pages</span>`
       : have ? `<span class="get have">On phone</span>`
       : state === "ready" ? `<span class="get" data-get="${esc(v.id)}">Get</span>`
       : `<span class="get raw" data-get="${esc(v.id)}">Read raw</span>`;
@@ -2814,7 +2821,7 @@ async function downloadFromRepo(id) {
     busy(`Adding ${v.title}…`);
     const realId = await sha16(file);
     const vol = await importArchive(file, realId, null);
-    vol.repoId = v.id; vol.title = v.title; await put("volumes", vol);
+    vol.repoId = v.id; vol.title = v.title; vol.upscaled = v.upscaled || undefined; await put("volumes", vol);
     if (pack) await attachPack(vol, pack, v.packUpdated);
     toast(pack ? `${v.title} is on your phone and reads offline.`
                : `${v.title} is on your phone (raw). Readings attach automatically when the PC finishes.`);
@@ -2822,6 +2829,44 @@ async function downloadFromRepo(id) {
     console.error(e);
     toast(e && e.message === "http" ? netMsg(e, r) : /quota/i.test(String(e && e.name)) ? "Not enough storage on this device." : netMsg(e));
   } finally { repoBusy.delete(id); busy(""); renderRepo(); }
+}
+
+// 1.2.38: the laptop sharpened (upscaled) a volume that is already on this phone: fetch its pages again and replace
+// them in place. Same volume, reading position, readings and saved words; the page names don't change, so the readings
+// still fit (their boxes are fractions of the page).
+async function sharpenOnPhone(ids) {
+  let done = 0;
+  for (const id of ids) {
+    const v = repoIndex && repoIndex.volumes.find(x => x.id === id);
+    const lv = v && (await all("volumes")).find(x => x.repoId === v.id || x.id === v.id);
+    if (!v || !lv || repoBusy.has(id)) continue;
+    if (st.vol && st.vol.id === lv.id && !reader.hidden) { toast(`Close ${lv.title} first, then get its sharper pages.`); continue; }
+    repoBusy.set(id, 0); renderRepo();
+    try {
+      const r = await repoFetch(v.cbz); if (!r.ok) throw new Error("http");
+      const total = +r.headers.get("content-length") || v.bytes || 0;
+      const rd = r.body.getReader(), chunks = []; let got = 0, lastPaint = 0;
+      for (;;) {
+        const { done: end, value } = await rd.read(); if (end) break;
+        chunks.push(value); got += value.length;
+        if (total && Date.now() - lastPaint > 400) { lastPaint = Date.now(); repoBusy.set(id, Math.min(99, Math.round(got / total * 100))); renderRepo(); }
+      }
+      const file = new File(chunks, v.cbz.split("/").pop(), { type: "application/zip" });
+      let pack = null;
+      if (lv.hasPack && v.pack) { const pr = await repoFetch(v.pack); if (pr.ok) pack = await pr.json(); }
+      busy(`Sharper pages for ${lv.title}…`);
+      const vol = await importArchive(file, lv.id, null);
+      vol.title = lv.title; vol.repoId = lv.repoId || v.id; vol.upscaled = v.upscaled; vol.packUpdated = lv.packUpdated;
+      await put("volumes", vol);
+      if (pack) await attachPack(vol, pack, v.packUpdated);
+      done++;
+    } catch (e) {
+      console.error(e);
+      toast(e && e.message === "http" ? netMsg(e) : /quota/i.test(String(e && e.name)) ? "Not enough storage on this device." : netMsg(e));
+    } finally { repoBusy.delete(id); busy(""); }
+  }
+  if (done) toast(done === 1 ? "Sharper pages are on your phone." : `Sharper pages for ${done} volumes are on your phone.`);
+  renderRepo();
 }
 
 /* ================= online library (1.2.1): browse Suwayomi through the laptop's repository server ================= */
@@ -3288,7 +3333,7 @@ document.addEventListener("click", e => {
 
 /* ================= boot ================= */
 const applyGlass = () => document.documentElement.classList.toggle("glass", settings.glass !== "off");
-const APP_VERSION = "1.2.38";
+const APP_VERSION = "1.2.39";
 (async () => {
   settings = { ...DEF, ...(await kvGet("settings", {})) };
   applyGlass();
