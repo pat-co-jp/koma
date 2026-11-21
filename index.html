@@ -51,7 +51,7 @@ button:disabled{opacity:.35;cursor:default}
 .libbar .sortsel{flex:0 1 auto;min-width:0}
 .libbar .sortsel select{flex:0 1 auto;min-width:0;width:auto;max-width:240px;text-overflow:ellipsis;white-space:nowrap;overflow:hidden}
 .libbar > .lchip{flex:none}
-@media (max-width:520px){.libbar .sortsel > span{display:none}}
+@media (max-width:520px){.libbar .sortsel > span:not(.sw){display:none}}
 /* 1.2.29 (Patrick, outer screen): a select is as wide as its longest option, so each dropdown carried slack and the bar
    ran into the screen's right corner. fitSel() sizes each one to the option showing; the bar keeps 16 pt from the edge. */
 @media (max-width:700px){.libbar .sortsel select{max-width:200px}}
@@ -67,9 +67,18 @@ button:disabled{opacity:.35;cursor:default}
 .lchip.danger{color:#ff8a7a;border-color:#5a2323;background:#2a1616}
 .lchip.danger:disabled{opacity:.4}
 .selbar .selcount{flex:none;padding:6px 10px 0;font-size:13.5px;color:var(--text);font-weight:600}
-/* 1.2.32 (Patrick): the select-mode capsule is only as wide as its text or its buttons, whichever is wider */
-.libbar.selbar{flex-direction:column;align-items:flex-start;flex-wrap:nowrap;gap:6px}
-.selbtns{display:flex;flex-wrap:wrap;gap:8px}
+/* 1.2.40 (Patrick: "Make the options in the middle capsule fit on one line. Can remove the explanation text"): the
+   select-mode capsule is one row of buttons (Remove n carries the count) */
+.libbar.selbar{flex-direction:row;align-items:center;flex-wrap:nowrap;gap:8px}
+.selbtns{display:flex;flex-wrap:nowrap;gap:8px}
+/* 1.2.40 (Patrick: "Shorten the text in the filter capsule so it fits on one line, and display full text within the
+   dropdown menu itself"): a closed Sort/Show dropdown shows a short label (.sv, drawn over the select, whose own text is
+   hidden); the menu that opens lists the full names */
+.sortsel .sw{position:relative;display:flex;min-width:0;flex:0 1 auto}
+.sortsel .sw select{color:transparent;-webkit-text-fill-color:transparent}
+.sortsel .sw select option{color:#111;-webkit-text-fill-color:#111}
+.sortsel .sv{position:absolute;left:0;top:0;bottom:0;right:30px;display:flex;align-items:center;pointer-events:none;overflow:hidden;
+  white-space:nowrap;text-overflow:ellipsis;font:600 14px system-ui,-apple-system,sans-serif;color:var(--text)}
 .confirm{margin:-4px 0 16px;padding:12px 14px;border-radius:14px;background:#2a1616;border:1px solid #5a2323;display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 .confirm p{margin:0 0 4px;flex:1 1 100%;font-size:13.5px;line-height:1.4;color:var(--text)}
 .vol.selecting .cv img{transition:opacity .15s}
@@ -168,7 +177,7 @@ select.field option{color:#111;background:#fff}
 .olpop .field{margin:0}
 #lib.olsearching #olHead{margin-top:66px}
 #lib.headbar .lib-head{position:relative;z-index:25}
-.hmid .libbar .sortsel > span{display:none}            /* 1.2.34: the header row is tight in portrait */
+.hmid .libbar .sortsel > span:not(.sw){display:none}            /* 1.2.34: the header row is tight in portrait */
 .hmid .stick > .rseg button{padding:9px 13px}
 /* 1.2.33 (Patrick): the Catalogue and the Online Library lay out the same way: where the shelves are narrower than
    both capsules need on one line (the outer screen), the switch sits above the bar, left-aligned, in both views */
@@ -180,7 +189,7 @@ select.field option{color:#111;background:#fff}
 @container (max-width:760px){
   .stick > .rseg{display:none}
   .stick > .rselcap{display:flex;align-items:center;flex:none;padding:6px 8px;background:var(--ink);border-radius:16px}
-  .stick .libbar .sortsel > span{display:none}}
+  .stick .libbar .sortsel > span:not(.sw){display:none}}
 /* 1.2.32 (Patrick): on a wide screen (inner screen in landscape) the controls sit in the header row between the title
    and the buttons (placeBar), all at one height, instead of floating over the top of the shelves */
 .lib-head .hmid{display:none}
@@ -401,7 +410,7 @@ textarea.copybox{width:100%;height:160px;background:var(--panel);color:var(--tex
   box-shadow:var(--g-ring),var(--g-drop);border-radius:24px}
 .glass .libbar .sortsel select{background-color:rgba(255,255,255,.07);border-radius:999px;padding-left:16px}   /* 1.2.35: pills, like the switch */
 .glass .libbar{border-radius:999px}
-.glass .libbar.selbar{border-radius:27px}
+.glass .libbar.selbar{border-radius:999px}
 .hmid .selbar{border-radius:999px}
 .glass .stick > .rselcap{background:var(--g-light),rgba(30,30,35,.74);-webkit-backdrop-filter:var(--g-fx);backdrop-filter:var(--g-fx);
   box-shadow:var(--g-ring),var(--g-drop);border-radius:999px;padding:5px}
@@ -705,14 +714,19 @@ const LIB_FILTERS = [["all", "All"], ["unread", "Unread"], ["reading", "Reading"
 // 1.2.16: the Repository catalogue gets its own sort and filters (no reading state there; "added" = added on the laptop)
 const CAT_SORTS = [["added", "Newest added"], ["added-old", "Oldest added"], ["name", "Name (A–Z)"], ["name-desc", "Name (Z–A)"], ["series", "Series"]];
 const CAT_FILTERS = [["all", "All"], ["missing", "Not on phone"], ["phone", "On phone"], ["processing", "Processing"], ["ready", "Readings ready"]];
+// 1.2.40: what a closed dropdown shows (the menu keeps the full names above)
+const SHORT = { recent: "Recent", added: "Newest", "added-old": "Oldest", name: "A–Z", "name-desc": "Z–A", series: "Series",
+  all: "All", unread: "Unread", reading: "Reading", done: "Finished", ready: "Readings", missing: "Off phone", phone: "On phone", processing: "On PC" };
 let libSel = null, libConfirm = false;
 let catSel = null, catConfirm = false, catShown = [], catSharp = [];   // 1.2.37: select mode on the Catalogue (ids to remove from the laptop)          // 1.2.16: select mode on "On this phone" (a Set of volume ids)
 const selRuler = document.createElement("span");
 function fitSel(sel) {
   const o = sel.options[sel.selectedIndex]; if (!o) return;
-  const cs = getComputedStyle(sel);
+  const cs = getComputedStyle(sel), label = o.dataset.short || o.textContent;
+  const sv = sel.nextElementSibling && sel.nextElementSibling.classList.contains("sv") ? sel.nextElementSibling : null;
+  if (sv) { sv.textContent = label; sv.style.paddingLeft = cs.paddingLeft; sv.style.font = cs.font; sv.style.letterSpacing = cs.letterSpacing; }
   selRuler.style.cssText = `position:absolute;left:-9999px;top:0;visibility:hidden;white-space:pre;font-weight:${cs.fontWeight};font-size:${cs.fontSize};font-family:${cs.fontFamily};letter-spacing:${cs.letterSpacing}`;
-  selRuler.textContent = o.textContent;
+  selRuler.textContent = label;
   document.body.appendChild(selRuler);
   const w = selRuler.getBoundingClientRect().width + parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight)
           + parseFloat(cs.borderLeftWidth) + parseFloat(cs.borderRightWidth);
@@ -722,10 +736,10 @@ function fitSel(sel) {
 const fitSels = () => document.querySelectorAll(".libbar select, .stick .olbar select, .rselcap select").forEach(fitSel);
 function sortBar(kind, sorts, sort, filters, filt, count, extra = "") {
   return `<div class="libbar">
-    <label class="sortsel"><span>Sort</span><select data-${kind}sort aria-label="Sort volumes">${sorts.map(([k, l]) =>
-      `<option value="${k}"${k === sort ? " selected" : ""}>${l}</option>`).join("")}</select></label>
-    <label class="sortsel"><span>Show</span><select data-${kind}filter aria-label="Show">${filters.map(([k, l]) => { const n = count(k);
-      return `<option value="${k}" data-n="${n}"${k === filt ? " selected" : ""}>${l} · ${n}</option>`; }).join("")}</select></label>${extra}</div>`;
+    <label class="sortsel"><span>Sort</span><span class="sw"><select data-${kind}sort aria-label="Sort volumes">${sorts.map(([k, l]) =>
+      `<option value="${k}" data-short="${SHORT[k] || l}"${k === sort ? " selected" : ""}>${l}</option>`).join("")}</select><span class="sv" aria-hidden="true"></span></span></label>
+    <label class="sortsel"><span>Show</span><span class="sw"><select data-${kind}filter aria-label="Show">${filters.map(([k, l]) => { const n = count(k);
+      return `<option value="${k}" data-n="${n}" data-short="${SHORT[k] || l} · ${n}"${k === filt ? " selected" : ""}>${l} · ${n}</option>`; }).join("")}</select><span class="sv" aria-hidden="true"></span></span></label>${extra}</div>`;
 }
 async function shelves(list, title, card) {         // Series view: one shelf per series, in the list's order
   const groups = [];
@@ -789,7 +803,7 @@ async function renderLibrary() {
   if (libSel) {
     for (const id of [...libSel]) if (!allVols.some(v => v.id === id)) libSel.delete(id);
     const n = libSel.size, allOn = vols.length && vols.every(v => libSel.has(v.id));
-    bar = `<div class="libbar selbar"><span class="selcount">${n ? `${n} selected` : "Tap volumes to select them"}</span><div class="selbtns">
+    bar = `<div class="libbar selbar" aria-label="${n ? `${n} selected` : "Select volumes"}"><div class="selbtns">
       <button class="lchip" data-libsel="all">${allOn ? "Select none" : "Select all"}</button>
       <button class="lchip danger" data-libsel="remove"${n ? "" : " disabled"}>Remove${n ? " " + n : ""}</button>
       <button class="lchip" data-libsel="done">Done</button></div></div>` +
@@ -2723,7 +2737,7 @@ async function renderRepo() {
   if (catSel) {
     for (const id of [...catSel]) if (!allRepo.some(v => v.id === id)) catSel.delete(id);
     const n = catSel.size, allOn = vols.length && vols.every(v => catSel.has(v.id));
-    bar = `<div class="libbar selbar"><span class="selcount">${n ? `${n} selected` : "Tap volumes to remove them from the laptop"}</span><div class="selbtns">
+    bar = `<div class="libbar selbar" aria-label="${n ? `${n} selected` : "Select volumes to remove from the laptop"}"><div class="selbtns">
       <button class="lchip" data-catsel="all">${allOn ? "Select none" : "Select all"}</button>
       <button class="lchip danger" data-catsel="remove"${n ? "" : " disabled"}>Remove${n ? " " + n : ""}</button>
       <button class="lchip" data-catsel="done">Done</button></div></div>`;
@@ -3333,7 +3347,7 @@ document.addEventListener("click", e => {
 
 /* ================= boot ================= */
 const applyGlass = () => document.documentElement.classList.toggle("glass", settings.glass !== "off");
-const APP_VERSION = "1.2.39";
+const APP_VERSION = "1.2.40";
 (async () => {
   settings = { ...DEF, ...(await kvGet("settings", {})) };
   applyGlass();
