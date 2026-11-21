@@ -126,6 +126,7 @@ the app only talks to the repository link, never to Suwayomi directly.
 | `GET api/thumb/ID`, `GET api/icon/NAME` | Cover and source icon images |
 | `GET api/jobs` | Download jobs: `queued`, `downloading` (`done`/`total`), `sent`, `failed` (`error`) |
 | `POST api/download` `{chapterId, force}` | Queues a chapter: the host builds a `.cbz` (+ `ComicInfo.xml`) into `Koma/Inbox` and starts the pipeline |
+| `POST api/remove` `{ids: [volume ids]}` | (1.2.37) Removes volumes from the catalogue: their folders move from `Koma/Library` to `Koma/Removed` (recoverable) and leave `index.json`; a volume still processing is skipped while the pipeline runs. Answers `{removed, skipped: [{id, reason}]}` |
 
 - Errors are JSON `{error, message}`: `suwayomi_unreachable` (503), `source_error` (502, the source's
   own message), `bad_request` (400), `forbidden_origin` (403). A host without the API (404 on

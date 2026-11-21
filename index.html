@@ -78,6 +78,10 @@ button:disabled{opacity:.35;cursor:default}
 .vol.picked .tick{background:var(--accent);border-color:var(--accent)}
 .vol.picked .tick::after{content:"";position:absolute;left:8px;top:3px;width:6px;height:12px;border:solid #fff;border-width:0 2.5px 2.5px 0;transform:rotate(45deg)}
 .vol.picked .cv{outline:2.5px solid var(--accent);outline-offset:-1px}
+/* 1.2.37: removing from the catalogue asks in a card floating above the tab bar (the bar may sit in the header row) */
+.confirm.float{position:fixed;z-index:60;left:50%;transform:translateX(-50%);bottom:calc(env(safe-area-inset-bottom,0px) + 96px);
+  width:min(520px,calc(100vw - 32px));margin:0;background:#2a1616;box-shadow:0 10px 30px rgba(0,0,0,.5)}
+.glass .confirm.float{background:rgba(42,22,22,.94);-webkit-backdrop-filter:var(--g-fx);backdrop-filter:var(--g-fx)}
 .ser{margin:20px 0 10px;font-size:15px;font-weight:700;display:flex;align-items:baseline;gap:8px}
 .ser:first-of-type{margin-top:4px}
 .ser small{color:var(--mute);font-weight:500;font-size:12px}
@@ -488,7 +492,7 @@ html.glass #top .tgrp .ib{border-radius:50%}
 
 /* ---------- touch targets (1.2.4): every control owns at least 44 x 44 pt (Apple HIG) ---------- */
 /* Small pills keep their look and get an invisible hit area around them instead of growing. */
-button,select,input,[data-vol],[data-olmanga]{touch-action:manipulation}
+button,select,input,[data-vol],[data-olmanga],[data-cat]{touch-action:manipulation}
 .ib{width:44px;height:44px}
 .ib svg{width:23px;height:23px}
 .lib-head{gap:4px;padding-right:calc(var(--sr) + 8px + var(--cr,0px));padding-top:calc(var(--st) + 12px + var(--ct,0px))}   /* 1.2.30: clear of the Duo's status overlay */
@@ -685,7 +689,7 @@ function fmtBytes(b) { return b >= 1e9 ? (b / 1e9).toFixed(1) + " GB" : b >= 1e6
 let libTab = "device";
 document.querySelector(".tabs").addEventListener("click", e => {
   const b = e.target.closest("[data-tab]"); if (!b) return;
-  libTab = b.dataset.tab; libSel = null; libConfirm = false;
+  libTab = b.dataset.tab; libSel = null; libConfirm = false; catSel = null; catConfirm = false;
   document.querySelectorAll(".tabs button").forEach(x => x.classList.toggle("on", x === b));
   renderLibrary();
 });
@@ -697,7 +701,8 @@ const LIB_FILTERS = [["all", "All"], ["unread", "Unread"], ["reading", "Reading"
 // 1.2.16: the Repository catalogue gets its own sort and filters (no reading state there; "added" = added on the laptop)
 const CAT_SORTS = [["added", "Newest added"], ["added-old", "Oldest added"], ["name", "Name (A–Z)"], ["name-desc", "Name (Z–A)"], ["series", "Series"]];
 const CAT_FILTERS = [["all", "All"], ["missing", "Not on phone"], ["phone", "On phone"], ["processing", "Processing"], ["ready", "Readings ready"]];
-let libSel = null, libConfirm = false;          // 1.2.16: select mode on "On this phone" (a Set of volume ids)
+let libSel = null, libConfirm = false;
+let catSel = null, catConfirm = false, catShown = [];   // 1.2.37: select mode on the Catalogue (ids to remove from the laptop)          // 1.2.16: select mode on "On this phone" (a Set of volume ids)
 const selRuler = document.createElement("span");
 function fitSel(sel) {
   const o = sel.options[sel.selectedIndex]; if (!o) return;
@@ -849,6 +854,12 @@ $("#lib").addEventListener("click", e => {
   if (f) { if (f.dataset.libfilter) settings.libFilter = f.dataset.libfilter; else settings.catFilter = f.dataset.catfilter;
            kvSet("settings", settings); renderLibrary(); return; }
   const ls = e.target.closest("[data-libsel]"); if (ls) { libSelAction(ls.dataset.libsel); return; }
+  const cl = e.target.closest("[data-catsel]"); if (cl) { catSelAction(cl.dataset.catsel); return; }
+  if (catSel && libTab === "repo" && repoView === "catalogue") {   // 1.2.37: select mode: a tap picks the volume
+    const pc = e.target.closest("[data-cat]");
+    if (pc) { catSel.has(pc.dataset.cat) ? catSel.delete(pc.dataset.cat) : catSel.add(pc.dataset.cat); catConfirm = false; renderRepo(); }
+    return;
+  }
   if (libSel && libTab === "device") {                 // select mode: a tap picks the volume instead of opening it
     const pv = e.target.closest("[data-vol]");
     if (pv) { libSel.has(pv.dataset.vol) ? libSel.delete(pv.dataset.vol) : libSel.add(pv.dataset.vol); libConfirm = false; renderLibrary(); }
@@ -1509,7 +1520,10 @@ function chromeInsets() {
   // holds the status overlay, so everything already starts below it and needs no right reserve; the buttons capsule
   // sits at the right edge, directly below the status icons. The 174 pt reserve stays for a portrait window without it.
   const stTop = parseFloat(getComputedStyle(stProbe).paddingTop) || 0;
-  const v = { "--cl": inner ? "14px" : "", "--cr": inner ? (land ? "102px" : stTop >= 60 ? "" : "174px") : outer ? "20px" : "", "--ct": inner ? "6px" : "" };
+  // 1.2.37 (Patrick's portrait screenshot 17:46: the buttons capsule "slightly cut off by the status bar icons"): iOS's
+  // status pill reaches about 100 pt down in portrait, where the capsule started; the header row moves 12 pt lower there
+  const v = { "--cl": inner ? "14px" : "", "--cr": inner ? (land ? "102px" : stTop >= 60 ? "" : "174px") : outer ? "20px" : "",
+              "--ct": inner ? (!land && stTop >= 60 ? "18px" : "6px") : "" };
   for (const k in v) if (de.style.getPropertyValue(k) !== v[k]) { if (v[k]) de.style.setProperty(k, v[k]); else de.style.removeProperty(k); }
   de.classList.toggle("duo-inner", inner);
 }
@@ -1530,8 +1544,22 @@ function placeBar() {
   hmid.replaceChildren(...(b ? [b] : []));
   fitSels();
 }
+// 1.2.37 (Patrick: "press load more, it loads more but also brings me back to the top", inner screen only): a full
+// redraw replaces #libBody's content, and in the header-row layout WebKit put the scroll back to the top (elsewhere it
+// slipped by about the floating bar's height). A redraw of the same list (same view, source, sort and filter) now keeps
+// its position; a different list starts at the top.
+const listKey = () => { try {
+  return libTab === "repo" ? (repoView === "online" ? ["ol", ol.src, ol.mode, ol.q].join("|") : ["cat", settings.catSort, settings.catFilter].join("|"))
+    : ["dev", settings.libSort, settings.libFilter].join("|"); } catch { return ""; } };
+let libScroll = { key: "", y: 0 };
+libBodyEl.addEventListener("scroll", () => { libScroll = { key: listKey(), y: libBodyEl.scrollTop }; }, { passive: true });
 new MutationObserver(recs => {
-  if (recs.some(r => [...r.addedNodes].includes(libBodyEl.firstChild))) placeBar(); else fitSels();
+  if (recs.some(r => [...r.addedNodes].includes(libBodyEl.firstChild))) {
+    placeBar();
+    const k = listKey(), want = k && k === libScroll.key ? libScroll.y : 0;
+    if (Math.abs(libBodyEl.scrollTop - want) > 1) libBodyEl.scrollTop = want;
+    libScroll = { key: k, y: libBodyEl.scrollTop };
+  } else fitSels();
 }).observe(libBodyEl, { childList: true });
 const relayoutLib = () => { if (headWide() !== $("#lib").classList.contains("headbar") && settingsReady) renderLibrary(); };
 addEventListener("resize", relayoutLib); addEventListener("orientationchange", relayoutLib);
@@ -2627,6 +2655,7 @@ async function renderRepo() {
       <p>The link should serve <code>index.json</code> in Koma's catalogue format.</p></div>`;
     return;
   }
+  if (repoView !== "catalogue") { catSel = null; catConfirm = false; }
   if (repoView === "online") return renderOnline();
   if (!repoIndex && !repoErr) { body.innerHTML = repoSeg() + `<div class="empty"><p>Loading ${esc(repo.name)}…</p></div>`; await loadRepoIndex(); }
   if (!repo) return;                                    // removed (Settings) while the catalogue was loading
@@ -2644,11 +2673,29 @@ async function renderRepo() {
   const catMatch = (v, f) => f === "all" || (f === "missing" ? !local.has(v.id) : f === "phone" ? local.has(v.id) : repoState(v) === f);
   const prox = allRepo.filter(v => catMatch(v, cf)).map(v => ({ title: v.title, file: String(v.cbz || "").split("/").pop(), addedAt: Date.parse(v.added) || 0, _v: v }));
   const vols = sortVols(prox, cs).map(x => x._v);
-  const bar = sortBar("cat", CAT_SORTS, cs, CAT_FILTERS, cf, k => allRepo.filter(v => catMatch(v, k)).length);
+  // 1.2.37 (Patrick: "Add an option to remove volumes from my catalogue"): Select, pick, Remove n, confirm. The laptop
+  // moves each volume's folder to Koma › Removed (recoverable) and drops it from index.json (POST api/remove)
+  let bar, conf = "";
+  catShown = vols.map(v => v.id);
+  if (catSel) {
+    for (const id of [...catSel]) if (!allRepo.some(v => v.id === id)) catSel.delete(id);
+    const n = catSel.size, allOn = vols.length && vols.every(v => catSel.has(v.id));
+    bar = `<div class="libbar selbar"><span class="selcount">${n ? `${n} selected` : "Tap volumes to remove them from the laptop"}</span><div class="selbtns">
+      <button class="lchip" data-catsel="all">${allOn ? "Select none" : "Select all"}</button>
+      <button class="lchip danger" data-catsel="remove"${n ? "" : " disabled"}>Remove${n ? " " + n : ""}</button>
+      <button class="lchip" data-catsel="done">Done</button></div></div>`;
+    if (catConfirm && n) conf = `<div class="confirm float" role="alertdialog" aria-label="Confirm removal"><p>Remove ${n === 1 ? "this volume" : `these ${n} volumes`} from your laptop's library?
+      ${n === 1 ? "It moves" : "They move"} to <b>Koma › Removed</b> in iCloud Drive: move a folder back into Library to restore it, or delete it there.
+      ${n === 1 ? "A copy" : "Copies"} already on this phone stay.</p>
+      <button class="lchip danger" data-catsel="confirm">Remove</button><button class="lchip" data-catsel="cancel">Cancel</button></div>`;
+  } else bar = sortBar("cat", CAT_SORTS, cs, CAT_FILTERS, cf, k => allRepo.filter(v => catMatch(v, k)).length,
+                       `<button class="lchip" data-catsel="start">Select</button>`);
   const repoCard = async v => {
     const localId = local.get(v.id), have = !!localId, busyPct = repoBusy.get(v.id);
     const state = repoState(v);
-    const btn = busyPct != null ? `<span class="get busy">${busyPct}%</span>`
+    const picked = catSel && catSel.has(v.id);
+    const btn = catSel ? `<span class="tick" aria-hidden="true"></span>`
+      : busyPct != null ? `<span class="get busy">${busyPct}%</span>`
       : have ? `<span class="get have">On phone</span>`
       : state === "ready" ? `<span class="get" data-get="${esc(v.id)}">Get</span>`
       : `<span class="get raw" data-get="${esc(v.id)}">Read raw</span>`;
@@ -2660,7 +2707,8 @@ async function renderRepo() {
     const sub = (state === "failed" || state === "processing") && v.detail ? `<div class="rnote">${esc(v.detail)}</div>`
       : state === "ready" && have ? `<div class="rnote">Readings ready</div>` : "";
     const cu = await repoCover(v);
-    return `<div class="vol" ${have ? `data-vol="${esc(localId)}"` : ""}>
+    return `<div class="vol${catSel ? " selecting" : ""}${picked ? " picked" : ""}" ${catSel ? `data-cat="${esc(v.id)}" role="button" aria-pressed="${!!picked}"`
+      : have ? `data-vol="${esc(localId)}"` : ""}>
       <div class="cv">${cu ? `<img src="${cu}" alt="">` : ""}${btn}</div>
       ${badge}
       <div class="t">${esc(v.title)}</div>
@@ -2670,8 +2718,33 @@ async function renderRepo() {
     : cs === "series" ? await shelves(vols, v => ({ title: v.title }), repoCard)
     : `<div class="grid">${(await Promise.all(vols.map(repoCard))).join("")}</div>`;
   if (libTab !== "repo" || repoView !== "catalogue") return;
-  body.innerHTML = head(bar) + grid + await footer();
+  body.innerHTML = head(bar) + grid + conf + await footer();
   scheduleLive();
+}
+async function catSelAction(a) {
+  if (a === "start") { catSel = new Set(); catConfirm = false; }
+  else if (a === "done") { catSel = null; catConfirm = false; }
+  else if (a === "all") { const allOn = catShown.length && catShown.every(id => catSel.has(id)); catShown.forEach(id => allOn ? catSel.delete(id) : catSel.add(id)); catConfirm = false; }
+  else if (a === "remove") catConfirm = catSel.size > 0;
+  else if (a === "cancel") catConfirm = false;
+  else if (a === "confirm") {
+    const ids = [...catSel], n = ids.length;
+    busy(`Removing ${n} volume${n === 1 ? "" : "s"} from your laptop…`);
+    let res;
+    try { res = await olApi("api/remove", { method: "POST", body: { ids }, timeout: 60000 }); }
+    catch (e) {
+      busy(""); catConfirm = false;
+      toast(e && e.kind === "not_found" && e.status === 404 ? "Your laptop's repository server can't remove volumes yet: restart the \"Koma Repo Server\" task." : olMsg(e));
+      renderRepo(); return;
+    }
+    busy("");
+    const gone = new Set(res.removed || []), proc = (res.skipped || []).filter(s => s.reason === "processing").length;
+    if (repoIndex) repoIndex.volumes = repoIndex.volumes.filter(v => !gone.has(v.id));
+    catSel = null; catConfirm = false;
+    toast((gone.size ? `Removed ${gone.size} volume${gone.size === 1 ? "" : "s"} from your laptop's library.` : "Nothing was removed.")
+      + (proc ? ` ${proc} ${proc === 1 ? "is" : "are"} being processed on the PC right now: try again when it finishes.` : ""));
+  }
+  renderRepo();
 }
 async function repoAction(a) {
   if (a === "add-file") fileIn.click();
@@ -3178,7 +3251,7 @@ document.addEventListener("click", e => {
 
 /* ================= boot ================= */
 const applyGlass = () => document.documentElement.classList.toggle("glass", settings.glass !== "off");
-const APP_VERSION = "1.2.36";
+const APP_VERSION = "1.2.37";
 (async () => {
   settings = { ...DEF, ...(await kvGet("settings", {})) };
   applyGlass();
