@@ -207,6 +207,10 @@ select.field option{color:#111;background:#fff}
 /* ---------- reader ---------- */
 #reader{position:fixed;left:0;right:0;top:0;height:var(--app-h,100%);z-index:20;background:var(--ink)}
 #viewer{position:absolute;inset:0;touch-action:none;user-select:none;-webkit-user-select:none;overflow:hidden}
+#viewer img{-webkit-touch-callout:none}
+/* 1.2.38: press and hold magnifies the page under the finger (the loupe sits above it) */
+#loupe{position:fixed;left:0;top:0;z-index:40;width:168px;height:168px;border-radius:50%;pointer-events:none;background:#fff no-repeat;
+  box-shadow:0 0 0 2px rgba(255,255,255,.9),0 0 0 3px rgba(0,0,0,.25),0 12px 32px rgba(0,0,0,.55)}
 #stage{position:absolute;left:0;top:0;transform-origin:0 0;will-change:transform}
 #stage.anim{transition:transform .22s ease}
 .pw{position:absolute;left:0;top:0;width:100%;height:100%}
@@ -2375,16 +2379,45 @@ new ResizeObserver(() => { if (!reader.hidden) { layout(); if (st.sheet) keepBub
 
 /* gestures */
 const ptrs = new Map(); let pd = null, pinch = null, lastTap = 0, tapT = null;
+/* 1.2.38 (Patrick: "Is there a way to enhance text? Some of the furigana is hard to read"): press and hold on a page
+   (0.45 s, without moving) to see the scan under the finger at 3x in a loupe above it; slide to move it, lift to close.
+   It shows exactly what's in the scan (no sharpening, so no invented strokes), and never turns a page or opens a bubble. */
+const loupe = document.createElement("div"); loupe.id = "loupe"; loupe.hidden = true; reader.appendChild(loupe);
+const LOUPE_Z = 3, LOUPE_R = 84;
+let mag = false, magT = null;
+function magAt(x, y) {
+  const im = [...stage.querySelectorAll(".pw:not([hidden]) img")].find(i => {
+    const r = i.getBoundingClientRect(); return i.currentSrc && x >= r.left && x <= r.right && y >= r.top && y <= r.bottom; });
+  loupe.style.visibility = im ? "" : "hidden";
+  if (im) {
+    const r = im.getBoundingClientRect();
+    loupe.style.backgroundImage = `url("${im.currentSrc}")`;
+    loupe.style.backgroundSize = `${r.width * LOUPE_Z}px ${r.height * LOUPE_Z}px`;
+    loupe.style.backgroundPosition = `${LOUPE_R - (x - r.left) * LOUPE_Z}px ${LOUPE_R - (y - r.top) * LOUPE_Z}px`;
+  }
+  const lx = Math.max(6, Math.min(innerWidth - LOUPE_R * 2 - 6, x - LOUPE_R));
+  const ly = y - LOUPE_R * 2 - 40 >= 6 ? y - LOUPE_R * 2 - 40 : y + 40;      // above the finger, below it near the top
+  loupe.style.transform = `translate(${Math.round(lx)}px, ${Math.round(ly)}px)`;
+}
+function magStart() {
+  magT = null;
+  if (!pd || pd.moved || pd.turning || tn || pinch || ptrs.size !== 1) return;
+  mag = true; pd.moved = true; clearTimeout(tapT); tapT = null;
+  loupe.hidden = false; magAt(pd.cx, pd.cy);
+}
+function magEnd() { clearTimeout(magT); magT = null; if (mag) { mag = false; loupe.hidden = true; } }
 viewer.addEventListener("pointerdown", e => {
   if (tn && !tn.drag) turnLand();                        // touching during a turn animation lands it
   ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
   if (ptrs.size === 2) {
+    magEnd();
     const [a, b] = [...ptrs.values()];
     pinch = { d0: Math.hypot(a.x - b.x, a.y - b.y) || 1, z0: st.z.z };
     if (pd && pd.turning) { pd.turning = false; if (tn) tn.drag = false; turnRelease(0, true); }
     if (pd) pd.moved = true; return;
   }
-  pd = { x: e.clientX, y: e.clientY, tx: st.z.tx, ty: st.z.ty, moved: false, target: e.target, hist: [[e.clientX, e.timeStamp]] };
+  pd = { x: e.clientX, y: e.clientY, cx: e.clientX, cy: e.clientY, tx: st.z.tx, ty: st.z.ty, moved: false, target: e.target, hist: [[e.clientX, e.timeStamp]] };
+  clearTimeout(magT); magT = ptrs.size === 1 && !tn ? setTimeout(magStart, 450) : null;
 });
 viewer.addEventListener("pointermove", e => {
   if (!ptrs.has(e.pointerId)) return;
@@ -2394,7 +2427,9 @@ viewer.addEventListener("pointermove", e => {
     zoomAt((a.x + b.x) / 2, (a.y + b.y) / 2, pinch.z0 * Math.hypot(a.x - b.x, a.y - b.y) / pinch.d0); return;
   }
   if (!pd) return;
+  if (mag) { pd.cx = e.clientX; pd.cy = e.clientY; magAt(e.clientX, e.clientY); return; }
   const dx = e.clientX - pd.x, dy = e.clientY - pd.y;
+  if (magT && Math.abs(dx) + Math.abs(dy) > 10) { clearTimeout(magT); magT = null; }
   if (pd.turning) {
     pd.hist.push([e.clientX, e.timeStamp]); if (pd.hist.length > 10) pd.hist.shift();
     if (tn) tn.fy = e.clientY;
@@ -2403,7 +2438,7 @@ viewer.addEventListener("pointermove", e => {
   if (Math.abs(dx) + Math.abs(dy) > 10) pd.moved = true;
   if (st.z.z > 1 && pd.moved) { st.z.tx = pd.tx + dx; st.z.ty = pd.ty + dy; clampZ(); applyZ(); return; }
   if (!tn && st.z.z <= 1.001 && turnMode() !== "none" && Math.abs(dx) > 8 && Math.abs(dx) > Math.abs(dy) * 1.2) {
-    pd.turning = true; pd.moved = true; clearTimeout(tapT); tapT = null;
+    pd.turning = true; pd.moved = true; clearTimeout(tapT); tapT = null; clearTimeout(magT); magT = null;
     turnBegin(settings.dir === "rtl" ? dx > 0 : dx < 0, pd.y);
     tn.fy = e.clientY;
     tn.drag = true; pd.hist = [[e.clientX, e.timeStamp]];
@@ -2413,6 +2448,8 @@ viewer.addEventListener("pointermove", e => {
 function onUp(e) {
   if (!ptrs.has(e.pointerId)) return;
   ptrs.delete(e.pointerId);
+  if (mag) { magEnd(); pd = null; return; }
+  clearTimeout(magT); magT = null;
   if (pinch) { if (ptrs.size < 2) { pinch = null; pd = null; if (st.z.z < 1.05) { st.z.z = 1; clampZ(); applyZ(); } } return; }
   if (!pd) return;
   const p = pd; pd = null;
@@ -3251,7 +3288,7 @@ document.addEventListener("click", e => {
 
 /* ================= boot ================= */
 const applyGlass = () => document.documentElement.classList.toggle("glass", settings.glass !== "off");
-const APP_VERSION = "1.2.37";
+const APP_VERSION = "1.2.38";
 (async () => {
   settings = { ...DEF, ...(await kvGet("settings", {})) };
   applyGlass();
