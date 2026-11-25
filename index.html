@@ -997,7 +997,8 @@ async function storedZip(file) {
     if (h.byteLength < 30 || h.getUint32(0, true) !== 0x04034b50) throw new Error(`The archive is damaged (${n}).`);
     const s = f.off + 30 + h.getUint16(26, true) + h.getUint16(28, true);
     if (s + f.csize > file.size) throw new Error(`The archive is cut short (${n}).`);
-    return new Blob([file.slice(s, s + f.csize)], type ? { type } : {});
+    // 1.2.42: the page's bytes in their own buffer (as before 1.2.41): iOS didn't keep a Blob that is a slice of the file
+    return new Blob([await file.slice(s, s + f.csize).arrayBuffer()], type ? { type } : {});
   } };
 }
 async function importArchive(file, id, pack) {
@@ -1028,7 +1029,7 @@ async function importArchive(file, id, pack) {
   } catch {}
   const vol = { id, title: (pack && pack.title) || stemOf(file.name), names, pageCount: names.length, bytes: file.size, dims,
     addedAt: prev ? prev.addedAt : Date.now(), lastPage: prev ? prev.lastPage : 0, lastReadAt: prev ? prev.lastReadAt : 0,
-    hasPack: false, bubbles: 0, repoId: prev ? prev.repoId : undefined, file: file.name,
+    hasPack: false, bubbles: 0, repoId: prev ? prev.repoId : undefined, file: file.name, importedWith: APP_VERSION,
     series: ci.series ?? (prev && prev.series), num: ci.num ?? (prev && prev.num), volNo: ci.volNo ?? (prev && prev.volNo) };
   await put("volumes", vol);
   coverUrls.delete(id);
@@ -2760,7 +2761,7 @@ async function renderRepo() {
   const local = new Map(), localRec = new Map();
   for (const lv of await all("volumes")) { local.set(lv.id, lv.id); localRec.set(lv.id, lv); if (lv.repoId) { local.set(lv.repoId, lv.id); localRec.set(lv.repoId, lv); } }
   // 1.2.38: copies on this phone whose pages the laptop has since sharpened (upscaled)
-  const sharpable = v => { const lv = localRec.get(v.id); return !!(lv && v.upscaled && lv.upscaled !== v.upscaled); };
+  const sharpable = v => { const lv = localRec.get(v.id); return !!(lv && (lv.pagesBroken || (v.upscaled && lv.upscaled !== v.upscaled))); };
   catSharp = [];
   // 1.2.30: the switch and the sort/filter bar float together (.stick); Refresh became swipe down to refresh
   const head = (bar = "") => `<div class="libfade" aria-hidden="true"></div><div class="stick">${repoSeg()}${bar}</div>` +
@@ -2798,7 +2799,7 @@ async function renderRepo() {
     const picked = catSel && catSel.has(v.id);
     const btn = catSel ? `<span class="tick" aria-hidden="true"></span>`
       : busyPct != null ? `<span class="get busy">${busyPct}%</span>`
-      : have && sharpable(v) ? `<span class="get" data-sharp="${esc(v.id)}">Sharper pages</span>`
+      : have && sharpable(v) ? `<span class="get" data-sharp="${esc(v.id)}">${localRec.get(v.id).pagesBroken ? "Fetch pages again" : "Sharper pages"}</span>`
       : have ? `<span class="get have">On phone</span>`
       : state === "ready" ? `<span class="get" data-get="${esc(v.id)}">Get</span>`
       : `<span class="get raw" data-get="${esc(v.id)}">Read raw</span>`;
@@ -3401,9 +3402,37 @@ document.addEventListener("click", e => {
   ({ import: () => fileIn.click(), vocab: openVocab, settings: openSettings, "close-reader": closeReader, shift: shiftPairs })[a.dataset.act]?.();
 });
 
+// 1.2.42 (Patrick 25 Nov: ベルセルク 第5話 came through blank): 1.2.41 saved pages as slices of the downloaded file,
+// which iOS didn't keep intact. Once per version every page must start with an image signature and each volume's
+// first page must decode; a volume that fails is marked pagesBroken and its catalogue card offers "Fetch pages again".
+const isImg = b => (b[0] === 0xff && b[1] === 0xd8) || (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47)
+  || (b[0] === 0x47 && b[1] === 0x49 && b[2] === 0x46) || (b[0] === 0x52 && b[1] === 0x49 && b[8] === 0x57 && b[9] === 0x45)
+  || (b[4] === 0x66 && b[5] === 0x74 && b[6] === 0x79 && b[7] === 0x70);
+async function checkPages() {
+  if ((await kvGet("pagesChecked", "")) === APP_VERSION) return;
+  const bad = [];
+  for (const v of await all("volumes")) {
+    let ok = true;
+    try {
+      const pages = await tx(["pages"], "readonly", t => req(t.objectStore("pages").getAll(IDBKeyRange.bound([v.id, 0], [v.id, Infinity]))));
+      if (!pages.length || (v.pageCount && pages.length !== v.pageCount)) ok = false;
+      for (const p of ok ? pages : []) {
+        if (!p.blob || !isImg(new Uint8Array(await p.blob.slice(0, 12).arrayBuffer()))) { ok = false; break; }
+      }
+      if (ok) { const bm = await createImageBitmap(pages[0].blob); if (bm.close) bm.close(); }
+    } catch { ok = false; }
+    if (!ok !== !!v.pagesBroken) { const cur = await get("volumes", v.id); if (cur) { cur.pagesBroken = !ok || undefined; await put("volumes", cur); } }
+    if (!ok) bad.push(v.title);
+  }
+  await kvSet("pagesChecked", APP_VERSION);
+  if (bad.length) {
+    toast(`${bad.length === 1 ? `The pages of ${bad[0]} didn't` : `The pages of ${bad.length} volumes didn't`} save properly on this phone. Repository › Catalogue › Fetch pages again.`);
+    renderLibrary();
+  }
+}
 /* ================= boot ================= */
 const applyGlass = () => document.documentElement.classList.toggle("glass", settings.glass !== "off");
-const APP_VERSION = "1.2.41";
+const APP_VERSION = "1.2.42";
 (async () => {
   settings = { ...DEF, ...(await kvGet("settings", {})) };
   applyGlass();
@@ -3414,6 +3443,7 @@ const APP_VERSION = "1.2.41";
   renderLibrary();
   settingsReady = true;
   applyScreen(true);                                     // closed phone: show the cover from the start
+  setTimeout(() => checkPages().catch(e => console.error(e)), 1500);
   repo = await kvGet("repo", null);
   if (repo && navigator.onLine) loadRepoIndex().then(() => scheduleLive());
 })();
