@@ -958,25 +958,70 @@ function imgDims(buf) {
   } catch {}
   return null;
 }
-async function importArchive(file, id, pack) {
+// 1.2.41 (Patrick 25 Nov: Sharper pages for a 108 MB volume failed on the phone): archives whose entries are stored
+// uncompressed (all of the laptop's) are read straight from the file, one page at a time, instead of JSZip loading the
+// whole archive into memory on top of the download. Compressed entries, zip64, encrypted entries and names in a legacy
+// encoding still go through JSZip.
+async function openZip(file) {
+  const fast = await storedZip(file).catch(() => null);
+  if (fast) return fast;
   const zip = await JSZip.loadAsync(file);
-  const names = Object.values(zip.files).filter(f => !f.dir && IMG_RE.test(f.name) && !/(^|\/)(__MACOSX|\.)/.test(f.name)).map(f => f.name).sort(nat);
+  return { stored: false, files: Object.values(zip.files).filter(f => !f.dir).map(f => f.name),
+    blob: async (n, type) => new Blob([await zip.files[n].async("arraybuffer")], type ? { type } : {}) };
+}
+async function storedZip(file) {
+  const tl = Math.min(file.size, 65557);
+  const tail = new DataView(await file.slice(file.size - tl).arrayBuffer());
+  let e = -1;
+  for (let i = tl - 22; i >= 0; i--) if (tail.getUint32(i, true) === 0x06054b50) { e = i; break; }
+  if (e < 0) return null;
+  const count = tail.getUint16(e + 10, true), cdSize = tail.getUint32(e + 12, true), cdOff = tail.getUint32(e + 16, true);
+  if (count === 0xffff || cdOff === 0xffffffff || cdOff + cdSize > file.size) return null;
+  const cd = new DataView(await file.slice(cdOff, cdOff + cdSize).arrayBuffer());
+  const utf8 = new TextDecoder("utf-8", { fatal: true }), ents = new Map();
+  let p = 0;
+  for (let k = 0; k < count; k++) {
+    if (p + 46 > cd.byteLength || cd.getUint32(p, true) !== 0x02014b50) return null;
+    const flags = cd.getUint16(p + 8, true), method = cd.getUint16(p + 10, true), csize = cd.getUint32(p + 20, true);
+    const nlen = cd.getUint16(p + 28, true), xlen = cd.getUint16(p + 30, true), clen = cd.getUint16(p + 32, true);
+    const off = cd.getUint32(p + 42, true), raw = new Uint8Array(cd.buffer, cd.byteOffset + p + 46, nlen);
+    if (!(flags & 0x800) && raw.some(b => b > 0x7f)) return null;
+    const name = utf8.decode(raw);
+    p += 46 + nlen + xlen + clen;
+    if (name.endsWith("/")) continue;
+    if (method !== 0 || (flags & 1) || csize === 0xffffffff || off === 0xffffffff) return null;
+    ents.set(name, { csize, off });
+  }
+  return { stored: true, files: [...ents.keys()], blob: async (n, type) => {
+    const f = ents.get(n), h = new DataView(await file.slice(f.off, f.off + 30).arrayBuffer());
+    if (h.byteLength < 30 || h.getUint32(0, true) !== 0x04034b50) throw new Error(`The archive is damaged (${n}).`);
+    const s = f.off + 30 + h.getUint16(26, true) + h.getUint16(28, true);
+    if (s + f.csize > file.size) throw new Error(`The archive is cut short (${n}).`);
+    return new Blob([file.slice(s, s + f.csize)], type ? { type } : {});
+  } };
+}
+async function importArchive(file, id, pack) {
+  const zr = await openZip(file);
+  const names = zr.files.filter(n => IMG_RE.test(n) && !/(^|\/)(__MACOSX|\.)/.test(n)).sort(nat);
   if (!names.length) throw new Error("no images in " + file.name);
-  await tx(["pages"], "readwrite", t => { t.objectStore("pages").delete(IDBKeyRange.bound([id, 0], [id, Infinity])); });
+  // 1.2.41: pages are overwritten in place and only the surplus is deleted afterwards, so a failure part-way leaves a
+  // readable volume (its old pages, or old and new mixed), never one with pages missing
   const dims = [];
   for (let i = 0; i < names.length; i++) {
     if (i % 10 === 0) busy(`Importing ${file.name}… ${i}/${names.length}`);
-    const buf = await zip.files[names[i]].async("arraybuffer");
-    dims.push(imgDims(buf) || [0, 0]);
-    const blob = new Blob([buf], { type: mimeFor(names[i]) });
+    const blob = await zr.blob(names[i], mimeFor(names[i]));
+    let d = imgDims(await blob.slice(0, 262144).arrayBuffer());
+    if (!d && blob.size > 262144) d = imgDims(await blob.arrayBuffer());
+    dims.push(d || [0, 0]);
     await put("pages", { vol: id, i, name: names[i], blob });
   }
+  await tx(["pages"], "readwrite", t => { t.objectStore("pages").delete(IDBKeyRange.bound([id, names.length], [id, Infinity])); });
   const prev = await get("volumes", id);
   // 1.2.15: series and chapter from ComicInfo.xml when the archive has one (the Online Library always adds it)
   let ci = {};
-  const cx = Object.values(zip.files).find(f => !f.dir && /(^|\/)ComicInfo\.xml$/i.test(f.name));
+  const cx = zr.files.find(n => /(^|\/)ComicInfo\.xml$/i.test(n));
   if (cx) try {
-    const d = new DOMParser().parseFromString(await cx.async("string"), "application/xml");
+    const d = new DOMParser().parseFromString(await (await zr.blob(cx)).text(), "application/xml");
     const g = n => { const e = d.getElementsByTagName(n)[0]; return e ? e.textContent.trim() : ""; };
     ci = { series: g("Series") || undefined, num: g("Number") !== "" ? numOr(g("Number")) : undefined,
            volNo: g("Volume") !== "" ? numOr(g("Volume")) : undefined };
@@ -2813,27 +2858,42 @@ async function repoAction(a) {
   } else if (a === "refresh") { repoIndex = null; repoErr = ""; renderRepo(); }
   else if (a === "remove") { repo = null; repoIndex = null; repoErr = ""; repoCovers.clear(); olReset(true); await tx(["kv"], "readwrite", t => { t.objectStore("kv").delete("repo"); }); renderRepo(); }
 }
+// 1.2.41: a download is kept as a few large Blob parts (no whole copy in memory); progress as before
+async function readBody(r, total, onPct) {
+  const rd = r.body.getReader(), parts = []; let chunks = [], pend = 0, got = 0, last = 0;
+  for (;;) {
+    const { done, value } = await rd.read(); if (done) break;
+    chunks.push(value); pend += value.length; got += value.length;
+    if (pend >= 8388608) { parts.push(new Blob(chunks)); chunks = []; pend = 0; }
+    if (total && Date.now() - last > 400) { last = Date.now(); onPct(Math.min(99, Math.round(got / total * 100))); }
+  }
+  parts.push(new Blob(chunks));
+  return parts;
+}
+// 1.2.41: only a failed download is a connection problem; anything after it says what went wrong
+function importMsg(e, stage, title, r) {
+  const s = String(e && e.name ? `${e.name}: ${e.message}` : e);
+  if (/quota/i.test(s)) return "Not enough storage on this device.";
+  if (stage === "download") return netMsg(e, e && e.message === "http" ? r : undefined);
+  if (/memory|allocat/i.test(s)) return `${title} is too large to unpack on this phone right now (${s}). Close other apps and try again.`;
+  return `Couldn't add the pages of ${title} on this phone. ${(e && e.message) || e}`;
+}
 async function downloadFromRepo(id) {
   const v = repoIndex && repoIndex.volumes.find(x => x.id === id);
   if (!v || repoBusy.has(id)) return;
   repoBusy.set(id, 0); renderRepo();
-  let r;
+  let r, stage = "download";
   try {
     r = await repoFetch(v.cbz);
     if (!r.ok) throw new Error("http");
     const total = +r.headers.get("content-length") || v.bytes || 0;
-    const reader = r.body.getReader(); const chunks = []; let got = 0, lastPaint = 0;
-    for (;;) {
-      const { done, value } = await reader.read(); if (done) break;
-      chunks.push(value); got += value.length;
-      if (total && Date.now() - lastPaint > 400) { lastPaint = Date.now(); repoBusy.set(id, Math.min(99, Math.round(got / total * 100))); renderRepo(); }
-    }
-    const file = new File(chunks, v.cbz.split("/").pop(), { type: "application/zip" });
+    const file = new File(await readBody(r, total, pct => { repoBusy.set(id, pct); renderRepo(); }), v.cbz.split("/").pop(), { type: "application/zip" });
     let pack = null;
     if (v.pack && repoState(v) === "ready") { const pr = await repoFetch(v.pack); if (pr.ok) pack = await pr.json(); }
+    stage = "unpack";
     repoBusy.set(id, 99); renderRepo();
     busy(`Adding ${v.title}…`);
-    const realId = await sha16(file);
+    const realId = v.id;        // 1.2.41: the catalogue's id (hashing the archive read all of it into memory)
     const vol = await importArchive(file, realId, null);
     vol.repoId = v.id; vol.title = v.title; vol.upscaled = v.upscaled || undefined; await put("volumes", vol);
     if (pack) await attachPack(vol, pack, v.packUpdated);
@@ -2841,7 +2901,7 @@ async function downloadFromRepo(id) {
                : `${v.title} is on your phone (raw). Readings attach automatically when the PC finishes.`);
   } catch (e) {
     console.error(e);
-    toast(e && e.message === "http" ? netMsg(e, r) : /quota/i.test(String(e && e.name)) ? "Not enough storage on this device." : netMsg(e));
+    toast(importMsg(e, stage, v.title, r));
   } finally { repoBusy.delete(id); busy(""); renderRepo(); }
 }
 
@@ -2856,18 +2916,14 @@ async function sharpenOnPhone(ids) {
     if (!v || !lv || repoBusy.has(id)) continue;
     if (st.vol && st.vol.id === lv.id && !reader.hidden) { toast(`Close ${lv.title} first, then get its sharper pages.`); continue; }
     repoBusy.set(id, 0); renderRepo();
+    let r, stage = "download";
     try {
-      const r = await repoFetch(v.cbz); if (!r.ok) throw new Error("http");
+      r = await repoFetch(v.cbz); if (!r.ok) throw new Error("http");
       const total = +r.headers.get("content-length") || v.bytes || 0;
-      const rd = r.body.getReader(), chunks = []; let got = 0, lastPaint = 0;
-      for (;;) {
-        const { done: end, value } = await rd.read(); if (end) break;
-        chunks.push(value); got += value.length;
-        if (total && Date.now() - lastPaint > 400) { lastPaint = Date.now(); repoBusy.set(id, Math.min(99, Math.round(got / total * 100))); renderRepo(); }
-      }
-      const file = new File(chunks, v.cbz.split("/").pop(), { type: "application/zip" });
+      const file = new File(await readBody(r, total, pct => { repoBusy.set(id, pct); renderRepo(); }), v.cbz.split("/").pop(), { type: "application/zip" });
       let pack = null;
       if (lv.hasPack && v.pack) { const pr = await repoFetch(v.pack); if (pr.ok) pack = await pr.json(); }
+      stage = "unpack";
       busy(`Sharper pages for ${lv.title}…`);
       const vol = await importArchive(file, lv.id, null);
       vol.title = lv.title; vol.repoId = lv.repoId || v.id; vol.upscaled = v.upscaled; vol.packUpdated = lv.packUpdated;
@@ -2876,7 +2932,7 @@ async function sharpenOnPhone(ids) {
       done++;
     } catch (e) {
       console.error(e);
-      toast(e && e.message === "http" ? netMsg(e) : /quota/i.test(String(e && e.name)) ? "Not enough storage on this device." : netMsg(e));
+      toast(importMsg(e, stage, lv.title, r));
     } finally { repoBusy.delete(id); busy(""); }
   }
   if (done) toast(done === 1 ? "Sharper pages are on your phone." : `Sharper pages for ${done} volumes are on your phone.`);
@@ -3347,7 +3403,7 @@ document.addEventListener("click", e => {
 
 /* ================= boot ================= */
 const applyGlass = () => document.documentElement.classList.toggle("glass", settings.glass !== "off");
-const APP_VERSION = "1.2.40";
+const APP_VERSION = "1.2.41";
 (async () => {
   settings = { ...DEF, ...(await kvGet("settings", {})) };
   applyGlass();
