@@ -1,6 +1,7 @@
 /* Koma service worker: caches the app shell so the reader opens with no connection.
-   Bump VERSION on every release; the page offers a reload when a new version is ready. */
-const VERSION = "koma-v1.2.43";
+   Bump VERSION on every release. */
+const VERSION = "koma-v1.2.44";
+const DIAG = "koma-diag";
 const SHELL = [
   "./",
   "./index.html",
@@ -11,16 +12,34 @@ const SHELL = [
   "./apple-touch-icon.png"
 ];
 
+// 1.2.44 (Patrick 26 Nov: 1.2.43 was found on the site but never installed on the phone): each file is saved on its
+// own, so one that fails doesn't sink the update (only index.html is required); what happened is kept in the
+// "koma-diag" cache for Settings › About; and the new version takes over at once instead of waiting to be offered
+// (the page reloads itself, or after the reader is closed). cache: "reload" skips the browser's HTTP cache
+// (GitHub Pages allows 10 minutes), so a new version never gets stored with the previous release's files.
 self.addEventListener("install", e => {
-  // cache: "reload" skips the browser's HTTP cache (GitHub Pages allows 10 minutes), so a new version
-  // never gets stored with the previous release's files.
-  e.waitUntil(caches.open(VERSION).then(c => c.addAll(SHELL.map(u => new Request(u, { cache: "reload" })))));
+  e.waitUntil((async () => {
+    const c = await caches.open(VERSION), failed = [];
+    for (const u of SHELL) {
+      try {
+        const r = await fetch(new Request(u, { cache: "reload" }));
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        await c.put(u, r);
+      } catch (err) {
+        const why = err && err.message ? (err.name && err.name !== "Error" ? err.name + ": " : "") + err.message : String(err);
+        failed.push(`${u.replace("./", "") || "/"} (${why})`);
+      }
+    }
+    try { await (await caches.open(DIAG)).put("install", new Response(JSON.stringify({ version: VERSION, at: new Date().toISOString(), failed }))); } catch {}
+    if (!(await c.match("./index.html"))) throw new Error("index.html could not be saved");
+    await self.skipWaiting();
+  })());
 });
 
 self.addEventListener("activate", e => {
   e.waitUntil((async () => {
     const keys = await caches.keys();
-    await Promise.all(keys.filter(k => k !== VERSION).map(k => caches.delete(k)));
+    await Promise.all(keys.filter(k => k !== VERSION && k !== DIAG).map(k => caches.delete(k)));
     await self.clients.claim();
   })());
 });

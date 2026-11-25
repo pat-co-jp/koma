@@ -640,7 +640,16 @@ function offerUpdate(w) {
   toast("Update ready. Tap to reload.", applyUpdate, true);
   if (!panel.hidden && panel.querySelector("#scrInfo")) openSettings();      // About shows Update now at once
 }
-let swReg = null, updStatus = "", updChecking = false;
+let swReg = null, updStatus = "", updChecking = false, installDiag = "", pendingReload = false;
+// 1.2.44: what the last install saved (written by sw.js), for Settings › About
+async function loadInstallDiag() {
+  try {
+    const r = await (await caches.open("koma-diag")).match("install"); if (!r) return;
+    const d = await r.json(), when = new Date(d.at);
+    installDiag = `Last update: ${String(d.version).replace("koma-v", "")} installed ${when.toLocaleDateString()} ${when.toTimeString().slice(0, 5)}`
+      + (d.failed && d.failed.length ? `; not saved: ${d.failed.join(", ")}.` : "; all files saved.");
+  } catch {}
+}
 const hhmm = () => new Date().toTimeString().slice(0, 5);
 function trackWorker(w) {
   if (!w || !navigator.serviceWorker.controller) return;
@@ -1086,6 +1095,7 @@ function closeReader() {
   if (st.url2) { URL.revokeObjectURL(st.url2); st.url2 = null; }
   st.unit = null;
   if (coverUp && !closedEl.hidden) coverShow();          // (cover up while leaving: show Koma's cover)
+  if (pendingReload) { location.reload(); return; }      // 1.2.44: a new version arrived while reading
   renderLibrary();
 }
 
@@ -3352,7 +3362,8 @@ async function openSettings() {
         ${seg("glass", [["on", "Liquid Glass"], ["off", "Solid"]])}<p>Liquid Glass: the reader's bars, the page number, the 読 button, the word sheet and the library's tab bar float as frosted glass over the pages. Solid: the previous look, a little lighter on the battery.</p></div>
       <div class="grp"><h3>About</h3><p>Koma ${APP_VERSION}. Everything is stored on this device and works with no connection.</p><p id="scrInfo">${screenInfo()}</p><p id="scrLog">${modeLog.length ? "Recent: " + esc(modeLog.join(" · ")) : ""}</p>
         ${updateWorker ? `<p><button class="dk pri" data-p="update">Update now</button> A new version is downloaded and ready.</p>`
-          : `<p><button class="dk" data-p="check-update">Check for updates</button> ${esc(updStatus || "Not checked yet.")}</p>`}</div>
+          : `<p><button class="dk" data-p="check-update">Check for updates</button> ${esc(updStatus || "Not checked yet.")}</p>`}
+        ${installDiag ? `<p id="instDiag">${esc(installDiag)}</p>` : ""}</div>
     </div>`;
 }
 panel.addEventListener("click", async e => {
@@ -3434,7 +3445,7 @@ async function checkPages() {
 }
 /* ================= boot ================= */
 const applyGlass = () => document.documentElement.classList.toggle("glass", settings.glass !== "off");
-const APP_VERSION = "1.2.43";
+const APP_VERSION = "1.2.44";
 (async () => {
   settings = { ...DEF, ...(await kvGet("settings", {})) };
   applyGlass();
@@ -3463,8 +3474,15 @@ if ("serviceWorker" in navigator) {
     // Home Screen apps on iOS usually resume rather than reload, so check again on return.
     document.addEventListener("visibilitychange", () => { if (!document.hidden) checkUpdate(false); });
   }).catch(e => { updStatus = "Couldn't start the update check: " + (e && e.message || e); });
+  // 1.2.44: a new version takes over by itself (sw.js skips waiting): reload now, or once the reader is closed
   let reloaded = false;
-  navigator.serviceWorker.addEventListener("controllerchange", () => { if (!reloaded) { reloaded = true; location.reload(); } });
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (reloaded) return;
+    updateWorker = null;                                 // the new version is already active: nothing left to offer
+    if (!reader.hidden) { pendingReload = true; toast("Koma has been updated. It reloads when you leave the reader.", null, true); return; }
+    reloaded = true; location.reload();
+  });
+  loadInstallDiag();
 }
 })();
 </script>
